@@ -1,0 +1,27 @@
+{
+  "name": "team20_fluence",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "",
+  "main": "database-test.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wmanicom10/Team20_Fluence.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/wmanicom10/Team20_Fluence/issues"
+  },
+  "homepage": "https://github.com/wmanicom10/Team20_Fluence#readme",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.95.3"
+  }
+}
