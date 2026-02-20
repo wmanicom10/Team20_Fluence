@@ -30,6 +30,11 @@ function Navbar() {
             Disease Data
           </Link>
         </li>
+        <li>
+          <Link to="/map" className={isActive('/map')}>
+            Map
+          </Link>
+        </li>
       </ul>
     </nav>
   );

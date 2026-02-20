@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import DiseaseDataView from './pages/DiseaseDataView';
+import MapView from './pages/MapView';
 import './App.css';
 
 /**
@@ -11,6 +12,7 @@ import './App.css';
  * Routes:
  * - / : Home page
  * - /data : Disease data display view
+ * - /map : Disease map view
  */
 function App() {
   return (
@@ -21,6 +23,7 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/data" element={<DiseaseDataView />} />
+            <Route path="/map" element={<MapView />} />
           </Routes>
         </main>
       </div>
