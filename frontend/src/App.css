@@ -437,4 +437,83 @@
     margin-left: 0;
     justify-content: center;
   }
+
+  .map-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* ========================================
+   Map View Styles
+   ======================================== */
+.map-view {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.map-filters {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  padding: 1rem 1.5rem;
+  background: #f8f9fa;
+  border-radius: 10px;
+  margin-bottom: 1.5rem;
+  border: 1px solid #e9ecef;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filter-group label {
+  font-weight: 600;
+  color: #555;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.filter-group select,
+.filter-group input[type="date"] {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: white;
+  color: #333;
+  cursor: pointer;
+}
+
+.filter-group select:focus,
+.filter-group input[type="date"]:focus {
+  outline: none;
+  border-color: #2d8bba;
+  box-shadow: 0 0 0 2px rgba(45, 139, 186, 0.2);
+}
+
+.clear-filters-btn {
+  padding: 0.5rem 1rem;
+  background: #e9ecef;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: #555;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clear-filters-btn:hover {
+  background: #dee2e6;
+  color: #333;
+}
+
+.filter-count {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: #888;
+  font-style: italic;
 }

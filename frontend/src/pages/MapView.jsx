@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import { mockDiseaseData } from '../data/mockDiseaseData';
+import { mockDiseaseData, diseaseTypes } from '../data/mockDiseaseData';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -31,12 +32,40 @@ const locationCoords = {
 /**
  * MapView Page Component
  * Displays disease data as markers on an interactive Leaflet map
+ * Includes disease dropdown filter and date range selector
  * Uses hardcoded sample data - no backend dependency required
  */
 function MapView() {
+  const [selectedDisease, setSelectedDisease] = useState('All Diseases');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
   // Center map on the US
   const mapCenter = [39.8283, -98.5795];
   const defaultZoom = 4;
+
+  // Filter data based on disease selection and date range
+  const filteredData = mockDiseaseData.filter(item => {
+    // Disease filter
+    if (selectedDisease !== 'All Diseases' && item.disease !== selectedDisease) {
+      return false;
+    }
+    // Date range filter
+    if (startDate && item.date < startDate) {
+      return false;
+    }
+    if (endDate && item.date > endDate) {
+      return false;
+    }
+    return true;
+  });
+
+  // Clear all filters
+  const handleClearFilters = () => {
+    setSelectedDisease('All Diseases');
+    setStartDate('');
+    setEndDate('');
+  };
 
   return (
     <div className="map-view">
@@ -44,6 +73,50 @@ function MapView() {
         <h1>Disease Map</h1>
         <p>Geographic view of disease surveillance data</p>
       </header>
+
+      {/* Filter Controls */}
+      <section className="map-filters">
+        <div className="filter-group">
+          <label htmlFor="map-disease-filter">Disease:</label>
+          <select
+            id="map-disease-filter"
+            value={selectedDisease}
+            onChange={(e) => setSelectedDisease(e.target.value)}
+          >
+            {diseaseTypes.map(type => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="filter-group">
+          <label htmlFor="map-start-date">From:</label>
+          <input
+            type="date"
+            id="map-start-date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+        </div>
+
+        <div className="filter-group">
+          <label htmlFor="map-end-date">To:</label>
+          <input
+            type="date"
+            id="map-end-date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
+        </div>
+
+        <button className="clear-filters-btn" onClick={handleClearFilters}>
+          Clear Filters
+        </button>
+
+        <span className="filter-count">
+          Showing {filteredData.length} of {mockDiseaseData.length} reports
+        </span>
+      </section>
 
       <div className="map-container" style={{ height: '600px', width: '100%' }}>
         <MapContainer
@@ -56,7 +129,7 @@ function MapView() {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {mockDiseaseData.map(item => {
+          {filteredData.map(item => {
             const coords = locationCoords[item.location];
             if (!coords) return null;
 
@@ -67,7 +140,8 @@ function MapView() {
                   {item.location}<br />
                   Cases: {item.caseCount.toLocaleString()}<br />
                   Severity: {item.severity}<br />
-                  New (24h): {item.newCases24h}
+                  New (24h): {item.newCases24h}<br />
+                  Date: {item.date}
                 </Popup>
               </Marker>
             );
