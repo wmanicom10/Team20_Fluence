@@ -22,6 +22,7 @@
   },
   "homepage": "https://github.com/wmanicom10/Team20_Fluence#readme",
   "dependencies": {
-    "@supabase/supabase-js": "^2.95.3"
+    "@supabase/supabase-js": "^2.95.3",
+    "postgres": "^3.4.8"
   }
 }
