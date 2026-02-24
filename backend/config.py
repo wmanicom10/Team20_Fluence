@@ -1,7 +1,16 @@
+import os
+
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
+
 class Config:
     # Flask
-    DEBUG = True
-    SECRET_KEY = "dev-key"
+    DEBUG = os.getenv("FLASK_DEBUG", "true").lower() == "true"
+    SECRET_KEY = os.getenv("SECRET_KEY", "dev-key")
 
-    # Placeholder for future DB wiring (NOT implemented here)
-    DATABASE_URL = None
+    # Supabase
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
