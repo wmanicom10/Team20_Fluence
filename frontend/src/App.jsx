@@ -3,6 +3,8 @@ import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import DiseaseDataView from './pages/DiseaseDataView';
 import MapView from './pages/MapView';
+import Login from './pages/Login';
+import Signup from './pages/Signup';
 import './App.css';
 
 /**
@@ -24,6 +26,8 @@ function App() {
             <Route path="/" element={<Home />} />
             <Route path="/data" element={<DiseaseDataView />} />
             <Route path="/map" element={<MapView />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
           </Routes>
         </main>
       </div>

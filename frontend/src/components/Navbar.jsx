@@ -35,6 +35,16 @@ function Navbar() {
             Map
           </Link>
         </li>
+        <li>
+          <Link to="/login" className={isActive('/login')}>
+            Login
+          </Link>
+        </li>
+        <li>
+          <Link to="/signup" className={isActive('/signup')}>
+            Sign Up
+          </Link>
+        </li>
       </ul>
     </nav>
   );
