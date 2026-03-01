@@ -36,6 +36,11 @@ function Navbar() {
           </Link>
         </li>
         <li>
+          <Link to="/submit" className={isActive('/submit')}>
+            Submit Case
+          </Link>
+        </li>
+        <li>
           <Link to="/login" className={isActive('/login')}>
             Login
           </Link>

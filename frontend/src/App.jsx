@@ -5,6 +5,7 @@ import DiseaseDataView from './pages/DiseaseDataView';
 import MapView from './pages/MapView';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import CaseSubmission from './pages/CaseSubmission';
 import './App.css';
 
 /**
@@ -28,6 +29,7 @@ function App() {
             <Route path="/map" element={<MapView />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/submit" element={<CaseSubmission />} />
           </Routes>
         </main>
       </div>
