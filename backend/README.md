@@ -1,38 +1,71 @@
 # Fluence Backend (Flask + Supabase)
 
-This backend now reads from Supabase using the same tables used in your partner's Node scripts.
+This backend follows REST-style API conventions with `/api/...` paths and a consistent response structure.
 
-## 1) Install dependencies
+## Response contract
+Success:
+```json
+{ "status": "success", "data": {} }
+```
+
+Error:
+```json
+{ "status": "error", "error": { "message": "...", "details": {} } }
+```
+
+## Frontend integration
+The frontend branch can replace mock data with these two endpoints directly:
+
+- `GET /api/ui/disease-data`
+- `GET /api/ui/disease-types`
+
+`/api/ui/disease-data` supports query params used by UI filters:
+- `disease` (example: `COVID-19`, or `All Diseases`)
+- `startDate` (`YYYY-MM-DD`)
+- `endDate` (`YYYY-MM-DD`)
+- `verified_only` (`true/false`, default `true`)
+
+Example response item shape (matches current frontend mock model):
+```json
+{
+  "id": 1,
+  "disease": "COVID-19",
+  "location": "New York City, New York",
+  "caseCount": 523,
+  "date": "2026-02-10",
+  "severity": "High",
+  "newCases24h": 523,
+  "rateOfChange": 0.0
+}
+```
+
+## Setup
 ```bash
 python -m venv .venv
 # Windows:
 .venv\Scripts\activate
-
 pip install -r requirements.txt
 ```
 
-## 2) Configure environment
 Create `backend/.env`:
-
 ```env
 SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 SUPABASE_KEY=YOUR_SUPABASE_KEY
 FLASK_DEBUG=true
 SECRET_KEY=dev-key
+CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-Use your own key values. Do not commit real keys.
-
-## 3) Run
+Run:
 ```bash
 cd backend
 python app.py
 ```
 
-## Endpoints
-- `GET /health`
-- `GET /diseases`
-- `GET /diseases?active_only=true`
-- `GET /cases`
-- `GET /cases?disease_name=COVID-19&date_from=2026-02-01&date_to=2026-02-15&verified_only=true`
-- `GET /cases?disease_id=3`
+## Core API endpoints
+- `GET /api/health`
+- `GET/POST /api/diseases`
+- `GET/POST /api/locations`
+- `GET/POST /api/cases`
+- `GET/PATCH/DELETE /api/cases/<case_id>`
+- `GET /api/metrics/cases-by-disease`
