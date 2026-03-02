@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import datetime
 
 from flask import current_app, jsonify, request
@@ -23,6 +24,23 @@ REQUIRED_CASE_FIELDS = {
     "location_id",
     "case_count",
     "date_reported",
+}
+
+SEVERITY_SCORES = {
+    "low": 1,
+    "mild": 1,
+    "medium": 2,
+    "moderate": 2,
+    "high": 3,
+    "severe": 3,
+    "critical": 4,
+}
+
+SEVERITY_LABELS = {
+    1: "Low",
+    2: "Medium",
+    3: "High",
+    4: "Critical",
 }
 
 
@@ -83,6 +101,107 @@ def _get_disease_id_by_name(client, disease_name):
     if not lookup.data:
         return None
     return lookup.data[0]["disease_id"]
+
+
+def _normalize_severity(raw_severity, case_count):
+    if raw_severity:
+        key = str(raw_severity).strip().lower()
+        if key in SEVERITY_SCORES:
+            return SEVERITY_LABELS[SEVERITY_SCORES[key]]
+
+    if case_count >= 500:
+        return "Critical"
+    if case_count >= 200:
+        return "High"
+    if case_count >= 75:
+        return "Medium"
+    return "Low"
+
+
+def _extract_nested_name(row, nested_field, fallback_field):
+    nested = row.get(nested_field)
+    if isinstance(nested, list) and nested:
+        return nested[0].get("name")
+    if isinstance(nested, dict):
+        return nested.get("name")
+    return row.get(fallback_field)
+
+
+def _extract_nested_location(row):
+    nested = row.get("locations")
+    if isinstance(nested, list) and nested:
+        nested = nested[0]
+    if not isinstance(nested, dict):
+        nested = {}
+
+    city = nested.get("city") or row.get("city") or "Unknown"
+    state = nested.get("state_province") or row.get("state_province")
+
+    return f"{city}, {state}" if state else city
+
+
+def _format_for_frontend(rows):
+    buckets = defaultdict(lambda: defaultdict(lambda: {
+        "caseCount": 0,
+        "severity_score": 1,
+        "severity_raw": None,
+    }))
+
+    for row in rows:
+        disease_name = _extract_nested_name(row, "diseases", "disease_name") or "Unknown"
+        location_label = _extract_nested_location(row)
+        date_reported = row.get("date_reported")
+        if not date_reported:
+            continue
+
+        try:
+            date_obj = datetime.strptime(date_reported, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+
+        case_count = int(row.get("case_count") or 0)
+        raw_severity = row.get("severity")
+        severity_score = SEVERITY_SCORES.get(str(raw_severity).lower(), 1) if raw_severity else 1
+
+        group = buckets[(disease_name, location_label)][date_obj]
+        group["caseCount"] += case_count
+        group["severity_score"] = max(group["severity_score"], severity_score)
+        if raw_severity:
+            group["severity_raw"] = raw_severity
+
+    formatted = []
+    next_id = 1
+
+    for (disease_name, location_label), date_map in buckets.items():
+        dates = sorted(date_map.keys(), reverse=True)
+        if not dates:
+            continue
+
+        latest_date = dates[0]
+        latest = date_map[latest_date]
+        latest_cases = latest["caseCount"]
+
+        prev_cases = date_map[dates[1]]["caseCount"] if len(dates) > 1 else latest_cases
+        if prev_cases <= 0:
+            rate_change = 0.0
+        else:
+            rate_change = round(((latest_cases - prev_cases) / prev_cases) * 100, 1)
+
+        severity = _normalize_severity(latest["severity_raw"], latest_cases)
+
+        formatted.append({
+            "id": next_id,
+            "disease": disease_name,
+            "location": location_label,
+            "caseCount": latest_cases,
+            "date": latest_date.isoformat(),
+            "severity": severity,
+            "newCases24h": latest_cases,
+            "rateOfChange": rate_change,
+        })
+        next_id += 1
+
+    return sorted(formatted, key=lambda item: item["caseCount"], reverse=True)
 
 
 def register_routes(app):
@@ -394,6 +513,63 @@ def register_routes(app):
             return _success({"deleted": True, "case_id": case_id}, 200)
         except Exception as exc:
             return _failure("Failed to delete case", 500, str(exc))
+
+    @app.get(f"{API_PREFIX}/ui/disease-data")
+    def ui_disease_data():
+        try:
+            client = get_supabase_client(current_app)
+            query = client.table("cases").select(
+                "case_count,date_reported,severity,"
+                "diseases(name),"
+                "locations(city,state_province)"
+            )
+
+            disease = request.args.get("disease")
+            start_date = request.args.get("startDate")
+            end_date = request.args.get("endDate")
+            verified_only = request.args.get("verified_only")
+
+            if disease and disease != "All Diseases":
+                disease_id = _get_disease_id_by_name(client, disease)
+                if not disease_id:
+                    return _success([], 200)
+                query = query.eq("disease_id", disease_id)
+
+            if start_date:
+                date_error = _validate_iso_date(start_date, "startDate")
+                if date_error:
+                    return date_error
+                query = query.gte("date_reported", start_date)
+
+            if end_date:
+                date_error = _validate_iso_date(end_date, "endDate")
+                if date_error:
+                    return date_error
+                query = query.lte("date_reported", end_date)
+
+            if verified_only is not None:
+                parsed_verified, bool_error = _parse_bool(verified_only, "verified_only")
+                if bool_error:
+                    return bool_error
+                query = query.eq("verified", parsed_verified)
+            else:
+                query = query.eq("verified", True)
+
+            result = query.execute()
+            formatted = _format_for_frontend(result.data or [])
+            return _success(formatted, 200)
+        except Exception as exc:
+            return _failure("Failed to load UI disease data", 500, str(exc))
+
+    @app.get(f"{API_PREFIX}/ui/disease-types")
+    def ui_disease_types():
+        try:
+            client = get_supabase_client(current_app)
+            result = client.table("diseases").select("name").eq("is_active", True).order("name").execute()
+            names = [row["name"] for row in (result.data or []) if row.get("name")]
+            return _success(["All Diseases", *names], 200)
+        except Exception as exc:
+            return _failure("Failed to load UI disease types", 500, str(exc))
 
     @app.get(f"{API_PREFIX}/metrics/cases-by-disease")
     def cases_by_disease_stats():
