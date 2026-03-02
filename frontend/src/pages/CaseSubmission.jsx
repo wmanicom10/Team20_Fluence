@@ -11,7 +11,6 @@ import { useState } from 'react';
  *  - Add optional notes textarea
  *  - Improve validation (date range check, better error messages)
  *  - Add success/confirmation screen after submit
- *  - TM20-55: Wire form to POST /cases backend endpoint
  */
 
 const DISEASE_OPTIONS = [
@@ -46,31 +45,88 @@ function CaseSubmission() {
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  const trySubmit = async (endpoint, payload) => {
+  const apiRequest = async (endpoint, options = {}) => {
     const response = await fetch(`${apiBaseUrl}${endpoint}`, {
-      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(options.headers || {}),
       },
-      body: JSON.stringify(payload),
+      ...options,
     });
 
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      const message = data?.message || data?.error || `Request failed (${response.status})`;
+      const message =
+        data?.error?.message ||
+        data?.message ||
+        (typeof data?.error === 'string' ? data.error : null) ||
+        `Request failed (${response.status})`;
       throw new Error(message);
     }
 
     return data;
   };
 
+  const resolveDiseaseId = async (diseaseName) => {
+    const result = await apiRequest('/api/diseases');
+    const diseases = result?.data || [];
+    const match = diseases.find(
+      (item) =>
+        String(item?.name || '').trim().toLowerCase() ===
+        String(diseaseName).trim().toLowerCase()
+    );
+
+    if (!match?.disease_id) {
+      throw new Error(
+        `Disease "${diseaseName}" was not found in backend records. Please use a disease already in the database.`
+      );
+    }
+
+    return Number(match.disease_id);
+  };
+
+  const resolveLocationId = async (city, state) => {
+    const trimmedCity = String(city || '').trim();
+    const trimmedState = String(state || '').trim();
+
+    if (!trimmedCity) {
+      throw new Error('City is required to map submission to a backend location record.');
+    }
+
+    const query = new URLSearchParams({ city: trimmedCity });
+    if (trimmedState) {
+      query.set('state_province', trimmedState);
+    }
+
+    const existing = await apiRequest(`/api/locations?${query.toString()}`);
+    const existingLocations = existing?.data || [];
+    if (existingLocations.length > 0 && existingLocations[0]?.location_id) {
+      return Number(existingLocations[0].location_id);
+    }
+
+    const created = await apiRequest('/api/locations', {
+      method: 'POST',
+      body: JSON.stringify({
+        city: trimmedCity,
+        state_province: trimmedState || null,
+        country: 'USA',
+      }),
+    });
+
+    const createdLocation = created?.data?.[0];
+    if (!createdLocation?.location_id) {
+      throw new Error('Failed to create a new location record for this submission.');
+    }
+
+    return Number(createdLocation.location_id);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSuccess('');
 
-    // Basic validation — just checks required fields are filled
-    if (!form.disease || !form.caseCount || !form.dateFrom || !form.dateTo) {
+    if (!form.disease || !form.caseCount || !form.dateFrom || !form.dateTo || !form.city) {
       setError('Please fill in all required fields.');
       return;
     }
@@ -82,34 +138,24 @@ function CaseSubmission() {
 
     setError('');
 
-    const dbPayload = {
-      case_count: Number(form.caseCount),
-      date_reported: form.dateTo,
-      severity: 'unknown',
-      verified: false,
-      data_source: 'case_submission_ui',
-      disease_name: form.disease,
-      city: form.city || null,
-      state: form.state || null,
-      date_from: form.dateFrom,
-      date_to: form.dateTo,
-    };
-
-    const pocPayload = {
-      patient_id: `hospital-report-${Date.now()}`,
-      diagnosis: form.disease,
-      reported_at: form.dateTo,
-      notes: `Count: ${form.caseCount}. Location: ${form.city || 'N/A'}, ${form.state || 'N/A'}. Range: ${form.dateFrom} to ${form.dateTo}`,
-    };
-
     setIsSubmitting(true);
 
     try {
-      try {
-        await trySubmit('/cases', dbPayload);
-      } catch {
-        await trySubmit('/api/cases', pocPayload);
-      }
+      const diseaseId = await resolveDiseaseId(form.disease);
+      const locationId = await resolveLocationId(form.city, form.state);
+
+      await apiRequest('/api/cases', {
+        method: 'POST',
+        body: JSON.stringify({
+          disease_id: diseaseId,
+          location_id: locationId,
+          case_count: Number(form.caseCount),
+          date_reported: form.dateTo,
+          severity: 'medium',
+          verified: false,
+          data_source: 'case_submission_ui',
+        }),
+      });
 
       setSuccess('Case submission sent successfully.');
       setForm({
@@ -200,7 +246,7 @@ function CaseSubmission() {
         {/* Location */}
         <div className="form-row">
           <div className="form-field">
-            <label htmlFor="cs-city">City</label>
+            <label htmlFor="cs-city">City *</label>
             <input
               id="cs-city"
               name="city"
@@ -239,8 +285,8 @@ function CaseSubmission() {
       <footer className="data-footer">
         <p>
           <em>
-            Note: Form now attempts backend submission. If API endpoints are not
-            fully available yet, you may see a temporary error.
+            Note: Form submits through backend APIs and creates/uses matching
+            location records before writing cases.
           </em>
         </p>
       </footer>
