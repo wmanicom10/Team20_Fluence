@@ -5,7 +5,11 @@ from flask import current_app, jsonify, request
 from db import get_supabase_client
 
 
+API_PREFIX = "/api"
+
 ALLOWED_CASE_UPDATE_FIELDS = {
+    "disease_id",
+    "location_id",
     "case_count",
     "date_reported",
     "severity",
@@ -13,7 +17,6 @@ ALLOWED_CASE_UPDATE_FIELDS = {
     "data_source",
     "source_api",
 }
-
 
 REQUIRED_CASE_FIELDS = {
     "disease_id",
@@ -23,18 +26,21 @@ REQUIRED_CASE_FIELDS = {
 }
 
 
-def _as_bool(value):
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return None
-    return str(value).lower() in {"1", "true", "yes", "y", "on"}
+def _success(data, status_code=200):
+    return jsonify({"status": "success", "data": data}), status_code
+
+
+def _failure(message, status_code=400, details=None):
+    error = {"message": message}
+    if details is not None:
+        error["details"] = details
+    return jsonify({"status": "error", "error": error}), status_code
 
 
 def _require_json_body():
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
-        return None, (jsonify({"message": "Request body must be valid JSON"}), 400)
+        return None, _failure("Request body must be valid JSON", 400)
     return payload, None
 
 
@@ -43,7 +49,27 @@ def _validate_iso_date(value, field_name):
         datetime.strptime(value, "%Y-%m-%d")
         return None
     except ValueError:
-        return jsonify({"message": f"{field_name} must use YYYY-MM-DD format"}), 400
+        return _failure(f"{field_name} must use YYYY-MM-DD format", 400)
+
+
+def _parse_bool(value, field_name):
+    if isinstance(value, bool):
+        return value, None
+
+    lowered = str(value).lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return True, None
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return False, None
+
+    return None, _failure(f"{field_name} must be a boolean value", 400)
+
+
+def _parse_int(value, field_name):
+    try:
+        return int(value), None
+    except (TypeError, ValueError):
+        return None, _failure(f"{field_name} must be an integer", 400)
 
 
 def _get_disease_id_by_name(client, disease_name):
@@ -60,27 +86,19 @@ def _get_disease_id_by_name(client, disease_name):
 
 
 def register_routes(app):
-    @app.get("/health")
+    @app.get(f"{API_PREFIX}/health")
     def health():
         try:
             client = get_supabase_client(current_app)
-            result = client.table("diseases").select("disease_id").limit(1).execute()
-            connected = result is not None
-        except Exception as exc:
-            return jsonify({
-                "status": "error",
+            client.table("diseases").select("disease_id").limit(1).execute()
+            return _success({
                 "service": "fluence-backend",
-                "database_connected": False,
-                "error": str(exc),
-            }), 500
+                "database_connected": True,
+            }, 200)
+        except Exception as exc:
+            return _failure("Database health check failed", 500, str(exc))
 
-        return jsonify({
-            "status": "ok",
-            "service": "fluence-backend",
-            "database_connected": connected,
-        }), 200
-
-    @app.get("/diseases")
+    @app.get(f"{API_PREFIX}/diseases")
     def get_diseases():
         try:
             client = get_supabase_client(current_app)
@@ -88,14 +106,17 @@ def register_routes(app):
 
             active_only = request.args.get("active_only")
             if active_only is not None:
-                query = query.eq("is_active", _as_bool(active_only))
+                parsed_active, bool_error = _parse_bool(active_only, "active_only")
+                if bool_error:
+                    return bool_error
+                query = query.eq("is_active", parsed_active)
 
             result = query.execute()
-            return jsonify({"data": result.data or []}), 200
+            return _success(result.data or [], 200)
         except Exception as exc:
-            return jsonify({"message": "Failed to load diseases", "error": str(exc)}), 500
+            return _failure("Failed to load diseases", 500, str(exc))
 
-    @app.post("/diseases")
+    @app.post(f"{API_PREFIX}/diseases")
     def create_disease():
         payload, error_response = _require_json_body()
         if error_response:
@@ -104,23 +125,34 @@ def register_routes(app):
         required_fields = {"name", "category", "severity_level"}
         missing = sorted(required_fields - set(payload.keys()))
         if missing:
-            return jsonify({"message": "Missing required fields", "missing": missing}), 400
+            return _failure("Missing required fields", 400, {"missing": missing})
+
+        for field in required_fields:
+            if not isinstance(payload[field], str) or not payload[field].strip():
+                return _failure(f"{field} must be a non-empty string", 400)
 
         try:
             client = get_supabase_client(current_app)
             insert_payload = {
-                "name": payload["name"],
-                "category": payload["category"],
-                "severity_level": payload["severity_level"],
+                "name": payload["name"].strip(),
+                "category": payload["category"].strip(),
+                "severity_level": payload["severity_level"].strip(),
                 "description": payload.get("description"),
-                "is_active": _as_bool(payload.get("is_active")) if payload.get("is_active") is not None else True,
+                "is_active": True,
             }
-            result = client.table("diseases").insert(insert_payload).execute()
-            return jsonify({"message": "Disease created", "data": result.data or []}), 201
-        except Exception as exc:
-            return jsonify({"message": "Failed to create disease", "error": str(exc)}), 500
 
-    @app.get("/locations")
+            if "is_active" in payload:
+                parsed_active, bool_error = _parse_bool(payload.get("is_active"), "is_active")
+                if bool_error:
+                    return bool_error
+                insert_payload["is_active"] = parsed_active
+
+            result = client.table("diseases").insert(insert_payload).execute()
+            return _success(result.data or [], 201)
+        except Exception as exc:
+            return _failure("Failed to create disease", 500, str(exc))
+
+    @app.get(f"{API_PREFIX}/locations")
     def get_locations():
         try:
             client = get_supabase_client(current_app)
@@ -132,11 +164,11 @@ def register_routes(app):
                     query = query.eq(field, value)
 
             result = query.execute()
-            return jsonify({"data": result.data or []}), 200
+            return _success(result.data or [], 200)
         except Exception as exc:
-            return jsonify({"message": "Failed to load locations", "error": str(exc)}), 500
+            return _failure("Failed to load locations", 500, str(exc))
 
-    @app.post("/locations")
+    @app.post(f"{API_PREFIX}/locations")
     def create_location():
         payload, error_response = _require_json_body()
         if error_response:
@@ -145,25 +177,29 @@ def register_routes(app):
         required_fields = {"country", "city"}
         missing = sorted(required_fields - set(payload.keys()))
         if missing:
-            return jsonify({"message": "Missing required fields", "missing": missing}), 400
+            return _failure("Missing required fields", 400, {"missing": missing})
+
+        for field in required_fields:
+            if not isinstance(payload[field], str) or not payload[field].strip():
+                return _failure(f"{field} must be a non-empty string", 400)
 
         try:
             client = get_supabase_client(current_app)
             insert_payload = {
-                "country": payload["country"],
+                "country": payload["country"].strip(),
                 "state_province": payload.get("state_province"),
-                "city": payload["city"],
+                "city": payload["city"].strip(),
                 "latitude": payload.get("latitude"),
                 "longitude": payload.get("longitude"),
                 "population": payload.get("population"),
                 "region_type": payload.get("region_type"),
             }
             result = client.table("locations").insert(insert_payload).execute()
-            return jsonify({"message": "Location created", "data": result.data or []}), 201
+            return _success(result.data or [], 201)
         except Exception as exc:
-            return jsonify({"message": "Failed to create location", "error": str(exc)}), 500
+            return _failure("Failed to create location", 500, str(exc))
 
-    @app.get("/cases")
+    @app.get(f"{API_PREFIX}/cases")
     def get_cases():
         try:
             client = get_supabase_client(current_app)
@@ -180,11 +216,14 @@ def register_routes(app):
             verified_only = request.args.get("verified_only")
 
             if disease_id:
-                query = query.eq("disease_id", disease_id)
+                parsed_disease_id, parse_error = _parse_int(disease_id, "disease_id")
+                if parse_error:
+                    return parse_error
+                query = query.eq("disease_id", parsed_disease_id)
             elif disease_name:
                 found_disease_id = _get_disease_id_by_name(client, disease_name)
                 if not found_disease_id:
-                    return jsonify({"data": [], "message": f'Disease "{disease_name}" not found'}), 200
+                    return _success([], 200)
                 query = query.eq("disease_id", found_disease_id)
 
             if date_from:
@@ -199,15 +238,39 @@ def register_routes(app):
                     return date_error
                 query = query.lte("date_reported", date_to)
 
-            if verified_only is not None and _as_bool(verified_only):
-                query = query.eq("verified", True)
+            if verified_only is not None:
+                parsed_verified, bool_error = _parse_bool(verified_only, "verified_only")
+                if bool_error:
+                    return bool_error
+                query = query.eq("verified", parsed_verified)
 
             result = query.order("date_reported", desc=True).execute()
-            return jsonify({"data": result.data or []}), 200
+            return _success(result.data or [], 200)
         except Exception as exc:
-            return jsonify({"message": "Failed to load cases", "error": str(exc)}), 500
+            return _failure("Failed to load cases", 500, str(exc))
 
-    @app.post("/cases")
+    @app.get(f"{API_PREFIX}/cases/<int:case_id>")
+    def get_case_by_id(case_id):
+        try:
+            client = get_supabase_client(current_app)
+            result = (
+                client.table("cases")
+                .select(
+                    "case_id,case_count,date_reported,severity,verified,data_source,source_api,"
+                    "diseases(disease_id,name,category,severity_level),"
+                    "locations(location_id,city,state_province,country,latitude,longitude)"
+                )
+                .eq("case_id", case_id)
+                .limit(1)
+                .execute()
+            )
+            if not result.data:
+                return _failure("Case not found", 404)
+            return _success(result.data[0], 200)
+        except Exception as exc:
+            return _failure("Failed to load case", 500, str(exc))
+
+    @app.post(f"{API_PREFIX}/cases")
     def create_case():
         payload, error_response = _require_json_body()
         if error_response:
@@ -215,30 +278,50 @@ def register_routes(app):
 
         missing = sorted(REQUIRED_CASE_FIELDS - set(payload.keys()))
         if missing:
-            return jsonify({"message": "Missing required fields", "missing": missing}), 400
+            return _failure("Missing required fields", 400, {"missing": missing})
+
+        parsed_disease_id, parse_error = _parse_int(payload["disease_id"], "disease_id")
+        if parse_error:
+            return parse_error
+
+        parsed_location_id, parse_error = _parse_int(payload["location_id"], "location_id")
+        if parse_error:
+            return parse_error
+
+        parsed_case_count, parse_error = _parse_int(payload["case_count"], "case_count")
+        if parse_error:
+            return parse_error
+        if parsed_case_count < 0:
+            return _failure("case_count must be >= 0", 400)
 
         date_error = _validate_iso_date(str(payload["date_reported"]), "date_reported")
         if date_error:
             return date_error
 
+        parsed_verified = False
+        if "verified" in payload:
+            parsed_verified, bool_error = _parse_bool(payload.get("verified"), "verified")
+            if bool_error:
+                return bool_error
+
         try:
             client = get_supabase_client(current_app)
             insert_payload = {
-                "disease_id": payload["disease_id"],
-                "location_id": payload["location_id"],
-                "case_count": payload["case_count"],
+                "disease_id": parsed_disease_id,
+                "location_id": parsed_location_id,
+                "case_count": parsed_case_count,
                 "date_reported": payload["date_reported"],
                 "data_source": payload.get("data_source", "manual_submission"),
                 "source_api": payload.get("source_api"),
                 "severity": payload.get("severity"),
-                "verified": _as_bool(payload.get("verified")) if payload.get("verified") is not None else False,
+                "verified": parsed_verified,
             }
             result = client.table("cases").insert(insert_payload).execute()
-            return jsonify({"message": "Case created", "data": result.data or []}), 201
+            return _success(result.data or [], 201)
         except Exception as exc:
-            return jsonify({"message": "Failed to create case", "error": str(exc)}), 500
+            return _failure("Failed to create case", 500, str(exc))
 
-    @app.patch("/cases/<int:case_id>")
+    @app.patch(f"{API_PREFIX}/cases/<int:case_id>")
     def update_case(case_id):
         payload, error_response = _require_json_body()
         if error_response:
@@ -246,10 +329,31 @@ def register_routes(app):
 
         update_fields = {k: v for k, v in payload.items() if k in ALLOWED_CASE_UPDATE_FIELDS}
         if not update_fields:
-            return jsonify({
-                "message": "No valid fields provided",
-                "allowed_fields": sorted(ALLOWED_CASE_UPDATE_FIELDS),
-            }), 400
+            return _failure(
+                "No valid fields provided",
+                400,
+                {"allowed_fields": sorted(ALLOWED_CASE_UPDATE_FIELDS)},
+            )
+
+        if "disease_id" in update_fields:
+            parsed_disease_id, parse_error = _parse_int(update_fields["disease_id"], "disease_id")
+            if parse_error:
+                return parse_error
+            update_fields["disease_id"] = parsed_disease_id
+
+        if "location_id" in update_fields:
+            parsed_location_id, parse_error = _parse_int(update_fields["location_id"], "location_id")
+            if parse_error:
+                return parse_error
+            update_fields["location_id"] = parsed_location_id
+
+        if "case_count" in update_fields:
+            parsed_case_count, parse_error = _parse_int(update_fields["case_count"], "case_count")
+            if parse_error:
+                return parse_error
+            if parsed_case_count < 0:
+                return _failure("case_count must be >= 0", 400)
+            update_fields["case_count"] = parsed_case_count
 
         if "date_reported" in update_fields:
             date_error = _validate_iso_date(str(update_fields["date_reported"]), "date_reported")
@@ -257,28 +361,53 @@ def register_routes(app):
                 return date_error
 
         if "verified" in update_fields:
-            update_fields["verified"] = _as_bool(update_fields["verified"])
+            parsed_verified, bool_error = _parse_bool(update_fields["verified"], "verified")
+            if bool_error:
+                return bool_error
+            update_fields["verified"] = parsed_verified
 
         try:
             client = get_supabase_client(current_app)
+            exists = client.table("cases").select("case_id").eq("case_id", case_id).limit(1).execute()
+            if not exists.data:
+                return _failure("Case not found", 404)
+
             result = (
                 client.table("cases")
                 .update(update_fields)
                 .eq("case_id", case_id)
                 .execute()
             )
-            return jsonify({"message": "Case updated", "data": result.data or []}), 200
+            return _success(result.data or [], 200)
         except Exception as exc:
-            return jsonify({"message": "Failed to update case", "error": str(exc)}), 500
+            return _failure("Failed to update case", 500, str(exc))
 
-    @app.get("/stats/cases-by-disease")
+    @app.delete(f"{API_PREFIX}/cases/<int:case_id>")
+    def delete_case(case_id):
+        try:
+            client = get_supabase_client(current_app)
+            exists = client.table("cases").select("case_id").eq("case_id", case_id).limit(1).execute()
+            if not exists.data:
+                return _failure("Case not found", 404)
+
+            client.table("cases").delete().eq("case_id", case_id).execute()
+            return _success({"deleted": True, "case_id": case_id}, 200)
+        except Exception as exc:
+            return _failure("Failed to delete case", 500, str(exc))
+
+    @app.get(f"{API_PREFIX}/metrics/cases-by-disease")
     def cases_by_disease_stats():
         try:
             client = get_supabase_client(current_app)
             query = client.table("cases").select("case_count,diseases(name)")
 
             verified_only = request.args.get("verified_only")
-            if verified_only is None or _as_bool(verified_only):
+            if verified_only is not None:
+                parsed_verified, bool_error = _parse_bool(verified_only, "verified_only")
+                if bool_error:
+                    return bool_error
+                query = query.eq("verified", parsed_verified)
+            else:
                 query = query.eq("verified", True)
 
             result = query.execute()
@@ -294,6 +423,6 @@ def register_routes(app):
                 {"disease_name": disease_name, "total_cases": total_cases}
                 for disease_name, total_cases in sorted(totals.items(), key=lambda item: item[1], reverse=True)
             ]
-            return jsonify({"data": data}), 200
+            return _success(data, 200)
         except Exception as exc:
-            return jsonify({"message": "Failed to compute stats", "error": str(exc)}), 500
+            return _failure("Failed to compute case metrics", 500, str(exc))
