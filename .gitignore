@@ -1,2 +1,4 @@
 api_stuff/node_modules/
-personal/ 
+database-test/node_modules
+.DS_Store
+personal/
