@@ -28,6 +28,7 @@ const DISEASE_OPTIONS = [
 ];
 
 function CaseSubmission() {
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000';
   const [form, setForm] = useState({
     disease: '',
     caseCount: '',
@@ -37,25 +38,95 @@ function CaseSubmission() {
     state: '',
   });
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const trySubmit = async (endpoint, payload) => {
+    const response = await fetch(`${apiBaseUrl}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const message = data?.message || data?.error || `Request failed (${response.status})`;
+      throw new Error(message);
+    }
+
+    return data;
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setSuccess('');
 
     // Basic validation — just checks required fields are filled
     if (!form.disease || !form.caseCount || !form.dateFrom || !form.dateTo) {
       setError('Please fill in all required fields.');
       return;
     }
+
+    if (form.dateFrom > form.dateTo) {
+      setError('Date From cannot be later than Date To.');
+      return;
+    }
+
     setError('');
 
-    // TODO (TM20-55): Replace console.log with POST to backend
-    console.log('Case submission payload:', form);
-    alert('Submission logged to console (backend not connected yet).');
+    const dbPayload = {
+      case_count: Number(form.caseCount),
+      date_reported: form.dateTo,
+      severity: 'unknown',
+      verified: false,
+      data_source: 'case_submission_ui',
+      disease_name: form.disease,
+      city: form.city || null,
+      state: form.state || null,
+      date_from: form.dateFrom,
+      date_to: form.dateTo,
+    };
+
+    const pocPayload = {
+      patient_id: `hospital-report-${Date.now()}`,
+      diagnosis: form.disease,
+      reported_at: form.dateTo,
+      notes: `Count: ${form.caseCount}. Location: ${form.city || 'N/A'}, ${form.state || 'N/A'}. Range: ${form.dateFrom} to ${form.dateTo}`,
+    };
+
+    setIsSubmitting(true);
+
+    try {
+      try {
+        await trySubmit('/cases', dbPayload);
+      } catch {
+        await trySubmit('/api/cases', pocPayload);
+      }
+
+      setSuccess('Case submission sent successfully.');
+      setForm({
+        disease: '',
+        caseCount: '',
+        dateFrom: '',
+        dateTo: '',
+        city: '',
+        state: '',
+      });
+    } catch (submitError) {
+      setError(
+        `Submission failed: ${submitError.message}. Backend endpoint may still be in progress.`
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -156,10 +227,11 @@ function CaseSubmission() {
         {/* TODO: Add severity dropdown and notes textarea here */}
 
         {error && <div className="form-error">{error}</div>}
+        {success && <div className="form-success">{success}</div>}
 
         <div className="form-actions">
-          <button type="submit" className="cta-button">
-            Submit Report
+          <button type="submit" className="cta-button" disabled={isSubmitting}>
+            {isSubmitting ? 'Submitting...' : 'Submit Report'}
           </button>
         </div>
       </form>
@@ -167,8 +239,8 @@ function CaseSubmission() {
       <footer className="data-footer">
         <p>
           <em>
-            Note: Submissions are currently logged to the console only. Backend
-            storage will be connected in a future update.
+            Note: Form now attempts backend submission. If API endpoints are not
+            fully available yet, you may see a temporary error.
           </em>
         </p>
       </footer>

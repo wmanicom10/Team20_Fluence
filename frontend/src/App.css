@@ -482,6 +482,15 @@
   border: 1px solid rgba(220, 53, 69, 0.12);
 }
 
+.form-success {
+  color: #1d7a34;
+  font-weight: 600;
+  background: #eefaf1;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid rgba(29, 122, 52, 0.2);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .main-content {
@@ -641,6 +650,11 @@
 
 .form-actions {
   margin-top: 0.5rem;
+}
+
+.form-actions .cta-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 @media (max-width: 768px) {
