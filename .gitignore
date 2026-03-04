@@ -1,4 +1,21 @@
+# Dependencies
+node_modules/
 api_stuff/node_modules/
-database-test/node_modules
+database-test/node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Personal notes (not shared)
 personal/
