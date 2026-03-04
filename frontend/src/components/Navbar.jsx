@@ -41,6 +41,11 @@ function Navbar() {
           </Link>
         </li>
         <li>
+          <Link to="/verify" className={isActive('/verify')}>
+            Verify Official
+          </Link>
+        </li>
+        <li>
           <Link to="/login" className={isActive('/login')}>
             Login
           </Link>

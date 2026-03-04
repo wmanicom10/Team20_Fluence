@@ -6,6 +6,7 @@ import MapView from './pages/MapView';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import CaseSubmission from './pages/CaseSubmission';
+import HealthOfficialAuth from './pages/HealthOfficialAuth';
 import './App.css';
 
 /**
@@ -30,6 +31,7 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/submit" element={<CaseSubmission />} />
+            <Route path="/verify" element={<HealthOfficialAuth />} />
           </Routes>
         </main>
       </div>
