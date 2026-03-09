@@ -4,12 +4,14 @@ import { Link } from 'react-router-dom';
 /**
  * HealthOfficialAuth Page Component
  * TM20-67: UI for authorizing health officials
+ * TM20-69: Connected to backend via POST /api/auth/verify-official
  *
  * Health officials submit their credentials (license number, issuing state, etc.)
  * to be verified before gaining elevated access (e.g., submitting case reports).
- *
- * TM20-69 will wire this form to the backend for actual verification.
  */
+
+// Backend base URL — reads from env var set in .env or falls back to local dev
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 
 const US_STATES = [
   'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado',
@@ -64,27 +66,36 @@ function HealthOfficialAuth() {
 
     setIsSubmitting(true);
 
-    // Placeholder — TM20-69 will replace this with a real backend call
-    // to POST /api/auth/verify-official (or similar endpoint)
     try {
-      // Simulate network delay for now
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      const res = await fetch(`${API_BASE}/api/auth/verify-official`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          full_name: form.fullName.trim(),
+          email: form.email.trim(),
+          license_number: form.licenseNumber.trim(),
+          issuing_state: form.issuingState,
+          organization: form.organization.trim(),
+          title: form.title.trim() || null,
+        }),
+      });
 
-      // TODO (TM20-69): Replace with actual API call, e.g.:
-      // const res = await fetch(`${apiBaseUrl}/api/auth/verify-official`, {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({
-      //     full_name: form.fullName,
-      //     email: form.email,
-      //     license_number: form.licenseNumber,
-      //     issuing_state: form.issuingState,
-      //     organization: form.organization,
-      //     title: form.title,
-      //   }),
-      // });
+      const data = await res.json().catch(() => null);
 
-      console.log('Health official verification submitted:', form);
+      if (!res.ok) {
+        // Backend returned an error — show its message if available
+        const msg =
+          data?.error?.message ||
+          data?.message ||
+          `Verification failed (status ${res.status})`;
+        setError(msg);
+        return;
+      }
+
+      // TODO: Once backend returns a session/token update, store it so the
+      // user's role is reflected immediately (e.g. via context or localStorage).
+
+      console.log('Verification response:', data);
       setSuccess(
         'Your credentials have been submitted for verification. ' +
         'You will be notified once your status is confirmed.'
@@ -98,7 +109,12 @@ function HealthOfficialAuth() {
         title: '',
       });
     } catch (err) {
-      setError(err.message || 'Verification request failed. Please try again.');
+      // Network error or backend not running
+      setError(
+        err.message === 'Failed to fetch'
+          ? 'Could not reach the server. Make sure the backend is running.'
+          : err.message || 'Verification request failed. Please try again.'
+      );
     } finally {
       setIsSubmitting(false);
     }
