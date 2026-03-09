@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import { mockDiseaseData, diseaseTypes } from '../data/mockDiseaseData';
+import { useEffect, useMemo, useState } from 'react';
+import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
 // Fix default marker icon issue with React-Leaflet
+// Uses CDN-hosted marker assets so markers render correctly in Vite.
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
@@ -12,55 +12,159 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
 });
 
-/**
- * Hardcoded coordinates for sample locations
- * Maps city names from mockDiseaseData to lat/lng
- */
-const locationCoords = {
-  "New York, NY": { lat: 40.7128, lng: -74.0060 },
-  "Los Angeles, CA": { lat: 34.0522, lng: -118.2437 },
-  "Chicago, IL": { lat: 41.8781, lng: -87.6298 },
-  "Houston, TX": { lat: 29.7604, lng: -95.3698 },
-  "Phoenix, AZ": { lat: 33.4484, lng: -112.0740 },
-  "Philadelphia, PA": { lat: 39.9526, lng: -75.1652 },
-  "San Antonio, TX": { lat: 29.4241, lng: -98.4936 },
-  "San Diego, CA": { lat: 32.7157, lng: -117.1611 },
-  "Dallas, TX": { lat: 32.7767, lng: -96.7970 },
-  "San Jose, CA": { lat: 37.3382, lng: -121.8863 },
+const mapCenter = [39.8283, -98.5795];
+const defaultZoom = 4;
+
+const getNestedObject = (value) => {
+  if (Array.isArray(value)) {
+    return value[0] || {};
+  }
+  if (value && typeof value === 'object') {
+    return value;
+  }
+  return {};
 };
 
-/**
- * MapView Page Component
- * Displays disease data as markers on an interactive Leaflet map
- * Includes disease dropdown filter and date range selector
- * Uses hardcoded sample data - no backend dependency required
- */
 function MapView() {
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000';
+
   const [selectedDisease, setSelectedDisease] = useState('All Diseases');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Center map on the US
-  const mapCenter = [39.8283, -98.5795];
-  const defaultZoom = 4;
+  const [diseaseTypes, setDiseaseTypes] = useState(['All Diseases']);
+  const [rawCases, setRawCases] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  // Filter data based on disease selection and date range
-  const filteredData = mockDiseaseData.filter(item => {
-    // Disease filter
-    if (selectedDisease !== 'All Diseases' && item.disease !== selectedDisease) {
-      return false;
-    }
-    // Date range filter
-    if (startDate && item.date < startDate) {
-      return false;
-    }
-    if (endDate && item.date > endDate) {
-      return false;
-    }
-    return true;
-  });
+  useEffect(() => {
+    let isActive = true;
 
-  // Clear all filters
+    const loadDiseaseTypes = async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/ui/disease-types`);
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok || payload?.status === 'error') {
+          const message =
+            payload?.error?.message ||
+            payload?.message ||
+            `Failed to load disease types (${response.status})`;
+          throw new Error(message);
+        }
+
+        const fetchedTypes = Array.isArray(payload?.data) ? payload.data : [];
+        const normalizedTypes = fetchedTypes.length > 0 ? fetchedTypes : ['All Diseases'];
+
+        if (isActive) {
+          setDiseaseTypes(normalizedTypes);
+          setSelectedDisease((prev) => (normalizedTypes.includes(prev) ? prev : 'All Diseases'));
+        }
+      } catch (loadError) {
+        if (isActive) {
+          setError(loadError.message);
+        }
+      }
+    };
+
+    loadDiseaseTypes();
+
+    return () => {
+      isActive = false;
+    };
+  }, [apiBaseUrl]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadCases = async () => {
+      if (startDate && endDate && startDate > endDate) {
+        setError('Start date cannot be later than end date.');
+        setRawCases([]);
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(true);
+      setError('');
+
+      try {
+        const params = new URLSearchParams({ verified_only: 'true' });
+
+        if (selectedDisease && selectedDisease !== 'All Diseases') {
+          params.set('disease_name', selectedDisease);
+        }
+
+        if (startDate) {
+          params.set('date_from', startDate);
+        }
+
+        if (endDate) {
+          params.set('date_to', endDate);
+        }
+
+        const response = await fetch(`${apiBaseUrl}/api/cases?${params.toString()}`);
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok || payload?.status === 'error') {
+          const message =
+            payload?.error?.message ||
+            payload?.message ||
+            `Failed to load map data (${response.status})`;
+          throw new Error(message);
+        }
+
+        if (isActive) {
+          setRawCases(Array.isArray(payload?.data) ? payload.data : []);
+        }
+      } catch (loadError) {
+        if (isActive) {
+          setError(loadError.message);
+          setRawCases([]);
+        }
+      } finally {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadCases();
+
+    return () => {
+      isActive = false;
+    };
+  }, [apiBaseUrl, selectedDisease, startDate, endDate]);
+
+  const markerData = useMemo(() => {
+    return rawCases
+      .map((item) => {
+        const disease = getNestedObject(item?.diseases);
+        const location = getNestedObject(item?.locations);
+
+        const city = location?.city || 'Unknown';
+        const state = location?.state_province || '';
+        const lat = Number(location?.latitude);
+        const lng = Number(location?.longitude);
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          return null;
+        }
+
+        return {
+          id: item?.case_id,
+          disease: disease?.name || 'Unknown',
+          locationLabel: state ? `${city}, ${state}` : city,
+          caseCount: Number(item?.case_count || 0),
+          severity: item?.severity || 'Unknown',
+          date: item?.date_reported || '',
+          lat,
+          lng,
+        };
+      })
+      .filter(Boolean);
+  }, [rawCases]);
+
   const handleClearFilters = () => {
     setSelectedDisease('All Diseases');
     setStartDate('');
@@ -74,7 +178,6 @@ function MapView() {
         <p>Geographic view of disease surveillance data</p>
       </header>
 
-      {/* Filter Controls */}
       <section className="map-filters">
         <div className="filter-group">
           <label htmlFor="map-disease-filter">Disease:</label>
@@ -83,8 +186,10 @@ function MapView() {
             value={selectedDisease}
             onChange={(e) => setSelectedDisease(e.target.value)}
           >
-            {diseaseTypes.map(type => (
-              <option key={type} value={type}>{type}</option>
+            {diseaseTypes.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
             ))}
           </select>
         </div>
@@ -113,10 +218,16 @@ function MapView() {
           Clear Filters
         </button>
 
-        <span className="filter-count">
-          Showing {filteredData.length} of {mockDiseaseData.length} reports
-        </span>
+        <span className="filter-count">Showing {markerData.length} reports on map</span>
       </section>
+
+      {isLoading && <p className="dashboard-state">Loading map data...</p>}
+      {!isLoading && error && (
+        <p className="dashboard-state dashboard-state-error">Unable to load map data: {error}</p>
+      )}
+      {!isLoading && !error && markerData.length === 0 && (
+        <p className="dashboard-state">No map data available for the selected filters.</p>
+      )}
 
       <div className="map-container" style={{ height: '600px', width: '100%' }}>
         <MapContainer
@@ -129,30 +240,28 @@ function MapView() {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {filteredData.map(item => {
-            const coords = locationCoords[item.location];
-            if (!coords) return null;
-
-            return (
-              <Marker key={item.id} position={[coords.lat, coords.lng]}>
+          {!isLoading && !error &&
+            markerData.map((item) => (
+              <Marker key={item.id} position={[item.lat, item.lng]}>
                 <Popup>
-                  <strong>{item.disease}</strong><br />
-                  {item.location}<br />
-                  Cases: {item.caseCount.toLocaleString()}<br />
-                  Severity: {item.severity}<br />
-                  New (24h): {item.newCases24h}<br />
-                  Date: {item.date}
+                  <strong>{item.disease}</strong>
+                  <br />
+                  {item.locationLabel}
+                  <br />
+                  Cases: {item.caseCount.toLocaleString()}
+                  <br />
+                  Severity: {item.severity}
+                  <br />
+                  Date: {item.date || 'N/A'}
                 </Popup>
               </Marker>
-            );
-          })}
+            ))}
         </MapContainer>
       </div>
 
       <footer className="data-footer">
         <p>
-          <em>Note: Currently displaying hardcoded sample data.
-          Live data integration will be implemented in future sprints.</em>
+          <em>Note: Data shown is loaded from live backend API responses.</em>
         </p>
       </footer>
     </div>
