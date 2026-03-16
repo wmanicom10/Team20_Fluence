@@ -7,6 +7,7 @@ import Login from './pages/Login';
 import Signup from './pages/Signup';
 import CaseSubmission from './pages/CaseSubmission';
 import HealthOfficialAuth from './pages/HealthOfficialAuth';
+import ProtectedRoute from './components/ProtectedRoute';
 import './App.css';
 
 /**
@@ -32,6 +33,7 @@ function App() {
             <Route path="/signup" element={<Signup />} />
             <Route path="/submit" element={<CaseSubmission />} />
             <Route path="/verify" element={<HealthOfficialAuth />} />
+            <Route path="/submit" element={<ProtectedRoute> <CaseSubmission /> </ProtectedRoute>} />
           </Routes>
         </main>
       </div>

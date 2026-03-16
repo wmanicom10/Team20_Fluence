@@ -43,6 +43,7 @@
 .nav-links {
   list-style: none;
   display: flex;
+  align-items: center;
   gap: 2rem;
   margin: 0;
   padding: 0;
@@ -59,6 +60,17 @@
 
 .nav-link:hover,
 .nav-link.active {
+  color: white;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.nav-email:hover  {
+  cursor: default;
+  color: rgba(255, 255, 255, 0.85);
+  background: none;
+}
+
+.nav-logout {
   color: white;
   background: rgba(255, 255, 255, 0.2);
 }
