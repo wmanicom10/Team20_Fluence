@@ -18,6 +18,9 @@ import './App.css';
  * - / : Home page
  * - /data : Disease data display view
  * - /map : Disease map view
+ * - /login, /signup : Authentication pages
+ * - /verify : Health official verification page
+ * - /submit : Protected case submission page
  */
 function App() {
   return (
@@ -31,9 +34,15 @@ function App() {
             <Route path="/map" element={<MapView />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
-            <Route path="/submit" element={<CaseSubmission />} />
             <Route path="/verify" element={<HealthOfficialAuth />} />
-            <Route path="/submit" element={<ProtectedRoute> <CaseSubmission /> </ProtectedRoute>} />
+            <Route
+              path="/submit"
+              element={
+                <ProtectedRoute>
+                  <CaseSubmission />
+                </ProtectedRoute>
+              }
+            />
           </Routes>
         </main>
       </div>
