@@ -65,6 +65,8 @@ python app.py
 ## Core API endpoints
 - `POST /api/auth/signup`
 - `POST /api/auth/login`
+- `POST /api/auth/verify-official`
+- `GET /api/auth/verify-official/status`
 - `GET /api/health`
 - `GET/POST /api/diseases`
 - `GET/POST /api/locations`
@@ -73,3 +75,4 @@ python app.py
 - `GET /api/metrics/cases-by-disease`
 
 Auth request/response examples are documented in [docs/auth-endpoints.md](../docs/auth-endpoints.md).
+Health official verification request/response examples are documented in [docs/health-official-verification-endpoint.md](../docs/health-official-verification-endpoint.md).

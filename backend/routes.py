@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 
 from flask import current_app, jsonify, request
@@ -881,7 +881,7 @@ def register_routes(app):
                 "organization": payload["organization"].strip(),
                 "title": (payload.get("title") or "").strip() or None,
                 "verified": False,
-                "submitted_at": datetime.utcnow().isoformat(),
+                "submitted_at": datetime.now(timezone.utc).isoformat(),
             }
             result = (
                 client.table("official_verifications")

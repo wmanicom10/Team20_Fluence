@@ -105,6 +105,75 @@ class AuthRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.get_json()["error"]["message"], "Invalid email or password")
 
+    def test_verify_official_requires_all_fields(self):
+        response = self.client.post(
+            "/api/auth/verify-official",
+            json={
+                "full_name": "Dr. Jane Smith",
+                "email": "jane@example.com",
+                "organization": "County Health Department",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        body = response.get_json()
+        self.assertEqual(body["status"], "error")
+        self.assertEqual(
+            body["error"]["details"]["missing"],
+            ["issuing_state", "license_number"],
+        )
+
+    def test_verify_official_rejects_blank_required_fields(self):
+        response = self.client.post(
+            "/api/auth/verify-official",
+            json={
+                "full_name": "  ",
+                "email": "jane@example.com",
+                "license_number": "MD-123456",
+                "issuing_state": "New York",
+                "organization": "County Health Department",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.get_json()["error"]["message"],
+            "full_name must be a non-empty string",
+        )
+
+    def test_verify_official_returns_frontend_friendly_success_shape(self):
+        inserted = []
+
+        fake_client = SimpleNamespace(
+            table=lambda name: SimpleNamespace(
+                insert=lambda payload: inserted.append((name, payload)) or SimpleNamespace(
+                    execute=lambda: SimpleNamespace(data=[payload])
+                )
+            )
+        )
+
+        with patch("routes.get_supabase_client", return_value=fake_client):
+            response = self.client.post(
+                "/api/auth/verify-official",
+                json={
+                    "full_name": "Dr. Jane Smith",
+                    "email": "jane@example.com",
+                    "license_number": "MD-123456",
+                    "issuing_state": "New York",
+                    "organization": "County Health Department",
+                    "title": "Epidemiologist",
+                },
+            )
+
+        self.assertEqual(response.status_code, 201)
+        body = response.get_json()
+        self.assertEqual(body["status"], "success")
+        self.assertEqual(body["data"]["verification_status"], "pending")
+        self.assertEqual(body["data"]["role"], "pending_official")
+        self.assertEqual(body["data"]["message"], "Verification request submitted successfully.")
+        self.assertEqual(inserted[0][0], "official_verifications")
+        self.assertEqual(inserted[0][1]["email"], "jane@example.com")
+
 
 if __name__ == "__main__":
     unittest.main()
