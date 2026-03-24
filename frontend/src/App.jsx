@@ -5,9 +5,12 @@ import DiseaseDataView from './pages/DiseaseDataView';
 import MapView from './pages/MapView';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import CaseSubmission from './pages/CaseSubmission';
 import HealthOfficialAuth from './pages/HealthOfficialAuth';
 import ProtectedRoute from './components/ProtectedRoute';
+import VerifyEmail from './pages/VerifyEmail';
 import './App.css';
 
 /**
@@ -34,6 +37,9 @@ function App() {
             <Route path="/map" element={<MapView />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/verify" element={<HealthOfficialAuth />} />
             <Route
               path="/submit"

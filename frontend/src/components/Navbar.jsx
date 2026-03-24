@@ -5,6 +5,9 @@ function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const isResettingPassword = location.pathname === '/reset-password' || 
+                              location.pathname === '/forgot-password' || 
+                              location.pathname === '/verify-email';
 
   const isActive = (path) => {
     return location.pathname === path ? 'nav-link active' : 'nav-link';
@@ -38,8 +41,7 @@ function Navbar() {
         <li>
           <Link to="/verify" className={isActive('/verify')}>Verify Official</Link>
         </li>
-
-        {user ? (
+        {user && !isResettingPassword ? (
           <>
             <li className="nav-email nav-link">{user.email}</li>
             <li>
@@ -48,7 +50,7 @@ function Navbar() {
               </button>
             </li>
           </>
-        ) : (
+        ) : !isResettingPassword && (
           <>
             <li>
               <Link to="/login" className={isActive('/login')}>Login</Link>

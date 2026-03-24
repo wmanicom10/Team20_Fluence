@@ -18,7 +18,14 @@ function Signup() {
     }
 
     // 1. Create auth user
-    const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: window.location.origin + '/verify-email'
+      }
+    });
+
     if (signUpError) {
       setError(signUpError.message);
       return;
@@ -40,7 +47,8 @@ function Signup() {
       return;
     }
 
-    navigate('/');
+    // After sign up, guide user to verify their email before signing in
+    navigate('/login', { state: { info: 'A verification email has been sent to your address. Please verify before signing in.' } });
 
   };
 

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 
 function Login() {
@@ -7,6 +7,16 @@ function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.state && location.state.info) {
+      setError('');
+      setInfo(location.state.info);
+    }
+  }, [location]);
+
+  const [info, setInfo] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -30,6 +40,13 @@ function Login() {
       // Non-fatal, don't block navigation
     }
 
+    // If email is not verified, show clear guidance instead of navigating silently
+    const emailConfirmed = data.user?.email_confirmed_at || data.user?.user_metadata?.email_confirmed_at;
+    if (!emailConfirmed) {
+      setInfo('Your email address is not verified. Please check your inbox for a verification email.');
+      return;
+    }
+
     navigate('/');
   };
 
@@ -49,12 +66,16 @@ function Login() {
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
               required placeholder="••••••••" />
           </label>
-          {error && <div className="form-error">{error}</div>}
+            {error && <div className="form-error">{error}</div>}
+            {info && <div className="form-info">{info}</div>}
           <button type="submit" className="cta-button login-btn">Sign In</button>
         </form>
-        <p style={{ marginTop: '1rem', fontSize: '0.95rem' }}>
-          Don't have an account? <Link to="/signup">Create one</Link>
-        </p>
+          <p style={{ marginTop: '1rem', fontSize: '0.95rem' }}>
+            Don't have an account? <Link to="/signup">Create one</Link>
+          </p>
+          <p style={{ marginTop: '0.25rem', fontSize: '0.95rem' }}>
+            <Link to="/forgot-password">Forgot password?</Link>
+          </p>
       </div>
     </div>
   );
