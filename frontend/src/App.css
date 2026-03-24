@@ -503,6 +503,21 @@
   border: 1px solid rgba(29, 122, 52, 0.2);
 }
 
+.password-requirements {
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0 0.75rem;
+  font-size: 0.85rem;
+}
+
+.req-met {
+  color: green;
+}
+
+.req-unmet {
+  color: #999;
+}
+
 /* Health Official Auth Page */
 .auth-page {
   display: flex;

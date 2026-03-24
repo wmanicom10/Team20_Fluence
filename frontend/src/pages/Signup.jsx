@@ -8,48 +8,68 @@ function Signup() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  const passwordRequirements = [
+    { label: 'At least 8 characters', met: password.length >= 8 },
+    { label: 'Contains a number', met: /\d/.test(password) },
+    { label: 'Contains an uppercase letter', met: /[A-Z]/.test(password) },
+  ];
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
+
     if (password !== confirm) {
       setError('Passwords do not match');
       return;
     }
+    if (!passwordRequirements.every((r) => r.met)) {
+      setError('Password does not meet all requirements');
+      return;
+    }
 
-    // 1. Create auth user
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: window.location.origin + '/verify-email'
+    setLoading(true);
+    try {
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: window.location.origin + '/verify-email'
+        }
+      });
+
+      if (signUpError) {
+        if (signUpError.message.toLowerCase().includes('already registered')) {
+          setError('An account with this email already exists. Try logging in instead.');
+        } else {
+          setError(signUpError.message);
+        }
+        return;
       }
-    });
 
-    if (signUpError) {
-      setError(signUpError.message);
-      return;
+      const { error: insertError } = await supabase.from('users').insert({
+        user_id: data.user.id,
+        email: email,
+        name: name,
+        role: 'public',
+        verified: false,
+        created_at: new Date().toISOString(),
+        last_login: new Date().toISOString(),
+      });
+
+      if (insertError && insertError.code !== '42501') {
+        setError(insertError.message);
+        return;
+      }
+
+      navigate('/login', { state: { info: 'A verification email has been sent to your address. Please verify before signing in.' } });
+    } catch (err) {
+      setError(err.message || 'Unexpected error creating account');
+    } finally {
+      setLoading(false);
     }
-
-    // 2. Insert into your users table
-    const { error: insertError } = await supabase.from('users').insert({
-      user_id: data.user.id,
-      email: email,
-      role: 'public',
-      verified: false,
-      created_at: new Date().toISOString(),
-      last_login: new Date().toISOString(),
-    });
-
-    // Only block if it's NOT an RLS read-back error
-    if (insertError && insertError.code !== '42501') {
-      setError(insertError.message);
-      return;
-    }
-
-    // After sign up, guide user to verify their email before signing in
-    navigate('/login', { state: { info: 'A verification email has been sent to your address. Please verify before signing in.' } });
-
   };
 
   return (
@@ -60,26 +80,33 @@ function Signup() {
         <form onSubmit={handleSubmit} className="login-form">
           <label>
             Full name
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-              required placeholder="Jane Doe" />
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} required placeholder="Jane Doe" />
           </label>
           <label>
             Email
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              required placeholder="you@domain.com" />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@domain.com" />
           </label>
           <label>
             Password
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              required placeholder="Create a password" />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Create a password" />
           </label>
+          {password.length > 0 && (
+            <ul className="password-requirements">
+              {passwordRequirements.map((r) => (
+                <li key={r.label} className={r.met ? 'req-met' : 'req-unmet'}>
+                  {r.met ? '✓' : '✗'} {r.label}
+                </li>
+              ))}
+            </ul>
+          )}
           <label>
             Confirm password
-            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
-              required placeholder="Repeat password" />
+            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required placeholder="Repeat password" />
           </label>
           {error && <div className="form-error">{error}</div>}
-          <button type="submit" className="cta-button login-btn">Create account</button>
+          <button type="submit" className="cta-button login-btn" disabled={loading}>
+            {loading ? 'Creating account...' : 'Create account'}
+          </button>
         </form>
         <p style={{ marginTop: '1rem', fontSize: '0.95rem' }}>
           Already have an account? <Link to="/login">Log in</Link>
