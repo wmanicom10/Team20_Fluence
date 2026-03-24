@@ -63,9 +63,13 @@ python app.py
 ```
 
 ## Core API endpoints
+- `POST /api/auth/signup`
+- `POST /api/auth/login`
 - `GET /api/health`
 - `GET/POST /api/diseases`
 - `GET/POST /api/locations`
 - `GET/POST /api/cases`
 - `GET/PATCH/DELETE /api/cases/<case_id>`
 - `GET /api/metrics/cases-by-disease`
+
+Auth request/response examples are documented in [docs/auth-endpoints.md](../docs/auth-endpoints.md).

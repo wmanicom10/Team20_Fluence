@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import datetime
+import re
 
 from flask import current_app, jsonify, request
 
@@ -7,6 +8,8 @@ from db import get_supabase_client
 
 
 API_PREFIX = "/api"
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MIN_PASSWORD_LENGTH = 8
 
 ALLOWED_CASE_UPDATE_FIELDS = {
     "disease_id",
@@ -60,6 +63,94 @@ def _require_json_body():
     if not isinstance(payload, dict):
         return None, _failure("Request body must be valid JSON", 400)
     return payload, None
+
+
+def _require_fields(payload, required_fields):
+    missing = sorted(field for field in required_fields if field not in payload)
+    if missing:
+        return _failure("Missing required fields", 400, {"missing": missing})
+    return None
+
+
+def _require_non_empty_string(value, field_name):
+    if not isinstance(value, str) or not value.strip():
+        return None, _failure(f"{field_name} must be a non-empty string", 400)
+    return value.strip(), None
+
+
+def _validate_email(email):
+    normalized_email, error_response = _require_non_empty_string(email, "email")
+    if error_response:
+        return None, error_response
+    if not EMAIL_REGEX.match(normalized_email):
+        return None, _failure("email must be a valid email address", 400)
+    return normalized_email.lower(), None
+
+
+def _validate_password(password):
+    normalized_password, error_response = _require_non_empty_string(password, "password")
+    if error_response:
+        return None, error_response
+    if len(normalized_password) < MIN_PASSWORD_LENGTH:
+        return None, _failure(
+            f"password must be at least {MIN_PASSWORD_LENGTH} characters long",
+            400,
+        )
+    return normalized_password, None
+
+
+def _serialize_auth_result(result):
+    user = getattr(result, "user", None)
+    session = getattr(result, "session", None)
+
+    user_data = None
+    if user is not None:
+        user_metadata = getattr(user, "user_metadata", None) or {}
+        user_data = {
+            "id": getattr(user, "id", None),
+            "email": getattr(user, "email", None),
+            "email_confirmed_at": getattr(user, "email_confirmed_at", None),
+            "last_sign_in_at": getattr(user, "last_sign_in_at", None),
+            "name": user_metadata.get("name"),
+        }
+
+    session_data = None
+    if session is not None:
+        session_data = {
+            "access_token": getattr(session, "access_token", None),
+            "refresh_token": getattr(session, "refresh_token", None),
+            "token_type": getattr(session, "token_type", None),
+            "expires_in": getattr(session, "expires_in", None),
+            "expires_at": getattr(session, "expires_at", None),
+        }
+
+    return {
+        "user": user_data,
+        "session": session_data,
+    }
+
+
+def _upsert_user_profile(client, auth_user, full_name, update_last_login=False):
+    if auth_user is None:
+        return
+
+    upsert_payload = {
+        "user_id": getattr(auth_user, "id", None),
+        "email": getattr(auth_user, "email", None),
+        "role": "public",
+    }
+
+    if update_last_login:
+        last_sign_in_at = getattr(auth_user, "last_sign_in_at", None)
+        if last_sign_in_at:
+            upsert_payload["last_login"] = last_sign_in_at
+
+    user_metadata = getattr(auth_user, "user_metadata", None) or {}
+    name_value = full_name or user_metadata.get("name")
+    if name_value:
+        upsert_payload["full_name"] = name_value
+
+    client.table("users").upsert(upsert_payload, on_conflict="user_id").execute()
 
 
 def _validate_iso_date(value, field_name):
@@ -205,6 +296,92 @@ def _format_for_frontend(rows):
 
 
 def register_routes(app):
+    @app.post(f"{API_PREFIX}/auth/signup")
+    def auth_signup():
+        payload, error_response = _require_json_body()
+        if error_response:
+            return error_response
+
+        required_error = _require_fields(payload, {"name", "email", "password"})
+        if required_error:
+            return required_error
+
+        full_name, error_response = _require_non_empty_string(payload.get("name"), "name")
+        if error_response:
+            return error_response
+
+        email, error_response = _validate_email(payload.get("email"))
+        if error_response:
+            return error_response
+
+        password, error_response = _validate_password(payload.get("password"))
+        if error_response:
+            return error_response
+
+        try:
+            client = get_supabase_client(current_app)
+            result = client.auth.sign_up({
+                "email": email,
+                "password": password,
+                "options": {
+                    "data": {
+                        "name": full_name,
+                    }
+                },
+            })
+
+            try:
+                _upsert_user_profile(client, getattr(result, "user", None), full_name)
+            except Exception:
+                pass
+
+            return _success(_serialize_auth_result(result), 201)
+        except Exception as exc:
+            return _failure("Failed to create account", 500, str(exc))
+
+    @app.post(f"{API_PREFIX}/auth/login")
+    def auth_login():
+        payload, error_response = _require_json_body()
+        if error_response:
+            return error_response
+
+        required_error = _require_fields(payload, {"email", "password"})
+        if required_error:
+            return required_error
+
+        email, error_response = _validate_email(payload.get("email"))
+        if error_response:
+            return error_response
+
+        password, error_response = _require_non_empty_string(payload.get("password"), "password")
+        if error_response:
+            return error_response
+
+        try:
+            client = get_supabase_client(current_app)
+            result = client.auth.sign_in_with_password({
+                "email": email,
+                "password": password,
+            })
+
+            try:
+                _upsert_user_profile(
+                    client,
+                    getattr(result, "user", None),
+                    None,
+                    update_last_login=True,
+                )
+            except Exception:
+                pass
+
+            return _success(_serialize_auth_result(result), 200)
+        except Exception as exc:
+            message = str(exc)
+            lowered = message.lower()
+            if "invalid login credentials" in lowered or "email not confirmed" in lowered:
+                return _failure("Invalid email or password", 401, message)
+            return _failure("Failed to log in", 500, message)
+
     @app.get(f"{API_PREFIX}/health")
     def health():
         try:
