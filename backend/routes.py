@@ -602,3 +602,119 @@ def register_routes(app):
             return _success(data, 200)
         except Exception as exc:
             return _failure("Failed to compute case metrics", 500, str(exc))
+
+    # ── Auth endpoints (TM20-87, TM20-88) ──────────────────────────────
+
+    @app.post(f"{API_PREFIX}/auth/signup")
+    def auth_signup():
+        """TM20-87: Create a new user account via Supabase Auth."""
+        payload, error_response = _require_json_body()
+        if error_response:
+            return error_response
+
+        email = payload.get("email", "").strip()
+        password = payload.get("password", "")
+
+        if not email:
+            return _failure("email is required", 400)
+        if not password or len(password) < 6:
+            return _failure("password must be at least 6 characters", 400)
+
+        try:
+            client = get_supabase_client(current_app)
+            result = client.auth.sign_up({"email": email, "password": password})
+
+            if hasattr(result, "user") and result.user:
+                return _success({
+                    "user_id": str(result.user.id),
+                    "email": result.user.email,
+                    "message": "Account created. Check your email for verification.",
+                }, 201)
+
+            return _failure("Signup failed — please try again", 400)
+        except Exception as exc:
+            msg = str(exc)
+            if "already registered" in msg.lower():
+                return _failure("An account with this email already exists", 409)
+            return _failure("Signup failed", 500, msg)
+
+    @app.post(f"{API_PREFIX}/auth/login")
+    def auth_login():
+        """TM20-87: Authenticate an existing user via Supabase Auth."""
+        payload, error_response = _require_json_body()
+        if error_response:
+            return error_response
+
+        email = payload.get("email", "").strip()
+        password = payload.get("password", "")
+
+        if not email:
+            return _failure("email is required", 400)
+        if not password:
+            return _failure("password is required", 400)
+
+        try:
+            client = get_supabase_client(current_app)
+            result = client.auth.sign_in_with_password(
+                {"email": email, "password": password}
+            )
+
+            if hasattr(result, "session") and result.session:
+                return _success({
+                    "user_id": str(result.user.id),
+                    "email": result.user.email,
+                    "access_token": result.session.access_token,
+                    "refresh_token": result.session.refresh_token,
+                    "role": "user",
+                }, 200)
+
+            return _failure("Invalid email or password", 401)
+        except Exception as exc:
+            msg = str(exc)
+            if "invalid" in msg.lower() or "credentials" in msg.lower():
+                return _failure("Invalid email or password", 401)
+            return _failure("Login failed", 500, msg)
+
+    REQUIRED_VERIFY_FIELDS = {"full_name", "email", "license_number",
+                              "issuing_state", "organization"}
+
+    @app.post(f"{API_PREFIX}/auth/verify-official")
+    def auth_verify_official():
+        """TM20-88: Submit health-official credentials for verification."""
+        payload, error_response = _require_json_body()
+        if error_response:
+            return error_response
+
+        missing = sorted(REQUIRED_VERIFY_FIELDS - set(payload.keys()))
+        if missing:
+            return _failure("Missing required fields", 400, {"missing": missing})
+
+        for field in REQUIRED_VERIFY_FIELDS:
+            value = payload.get(field)
+            if not isinstance(value, str) or not value.strip():
+                return _failure(f"{field} must be a non-empty string", 400)
+
+        try:
+            client = get_supabase_client(current_app)
+            record = {
+                "full_name": payload["full_name"].strip(),
+                "email": payload["email"].strip(),
+                "license_number": payload["license_number"].strip(),
+                "issuing_state": payload["issuing_state"].strip(),
+                "organization": payload["organization"].strip(),
+                "title": (payload.get("title") or "").strip() or None,
+                "verified": False,
+                "submitted_at": datetime.utcnow().isoformat(),
+            }
+            result = (
+                client.table("official_verifications")
+                .insert(record)
+                .execute()
+            )
+            return _success({
+                "message": "Verification request submitted successfully.",
+                "verification_status": "pending",
+                "role": "pending_official",
+            }, 201)
+        except Exception as exc:
+            return _failure("Failed to submit verification request", 500, str(exc))
