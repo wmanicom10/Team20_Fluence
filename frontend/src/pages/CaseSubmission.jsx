@@ -1,16 +1,14 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 /**
  * CaseSubmission Page Component
  * TM20-54: UI for submitting disease case reports
+ * TM20-89: Gated behind health-official verification status
  *
  * Accepts: disease type, case count, date range, location
- *
- * TODO (remaining work):
- *  - Add severity dropdown
- *  - Add optional notes textarea
- *  - Improve validation (date range check, better error messages)
- *  - Add success/confirmation screen after submit
+ * Non-verified users see guidance and a CTA to the verification page.
  */
 
 const DISEASE_OPTIONS = [
@@ -27,8 +25,10 @@ const DISEASE_OPTIONS = [
 ];
 
 function CaseSubmission() {
+  const { isVerifiedOfficial, role } = useAuth();
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000';
   const [form, setForm] = useState({
+
     disease: '',
     caseCount: '',
     dateFrom: '',
@@ -182,6 +182,42 @@ function CaseSubmission() {
         <p>Report new disease cases for inclusion in the surveillance system</p>
       </header>
 
+      {/* TM20-89: Verification gate — non-verified users see guidance + CTA */}
+      {!isVerifiedOfficial && (
+        <div className="auth-notice" style={{
+          background: 'rgba(255, 193, 7, 0.1)',
+          border: '1px solid rgba(255, 193, 7, 0.4)',
+          borderRadius: '8px',
+          padding: '1.5rem',
+          marginBottom: '1.5rem',
+          textAlign: 'center',
+        }}>
+          <h3 style={{ margin: '0 0 0.75rem', color: '#f5a623' }}>
+            🔒 Health Official Verification Required
+          </h3>
+          {role === 'pending_official' ? (
+            <p style={{ margin: '0 0 1rem', color: '#ccc' }}>
+              Your verification request is <strong>pending review</strong>.
+              You will be able to submit case reports once your credentials are confirmed.
+            </p>
+          ) : (
+            <p style={{ margin: '0 0 1rem', color: '#ccc' }}>
+              Only verified health officials can submit disease case reports.
+              Please verify your credentials to gain access.
+            </p>
+          )}
+          <Link
+            to="/verify"
+            className="cta-button"
+            style={{ display: 'inline-block', textDecoration: 'none' }}
+          >
+            {role === 'pending_official' ? 'Check Verification Status' : 'Verify Your Credentials'}
+          </Link>
+        </div>
+      )}
+
+      {isVerifiedOfficial && (
+      <>
       <form className="case-form" onSubmit={handleSubmit}>
         {/* Disease & Count */}
         <div className="form-row">
@@ -290,6 +326,8 @@ function CaseSubmission() {
           </em>
         </p>
       </footer>
+      </>
+      )}
     </div>
   );
 }

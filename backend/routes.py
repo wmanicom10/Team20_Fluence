@@ -718,3 +718,35 @@ def register_routes(app):
             }, 201)
         except Exception as exc:
             return _failure("Failed to submit verification request", 500, str(exc))
+
+    @app.get(f"{API_PREFIX}/auth/verify-official/status")
+    def auth_verify_official_status():
+        """TM20-89: Check health-official verification status by email."""
+        email = request.args.get("email", "").strip()
+        if not email:
+            return _failure("email query parameter is required", 400)
+
+        try:
+            client = get_supabase_client(current_app)
+            result = (
+                client.table("official_verifications")
+                .select("verified")
+                .eq("email", email)
+                .order("submitted_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+
+            if not result.data:
+                return _success({
+                    "verification_status": "none",
+                    "role": "user",
+                }, 200)
+
+            is_verified = result.data[0].get("verified", False)
+            return _success({
+                "verification_status": "verified" if is_verified else "pending",
+                "role": "health_official" if is_verified else "pending_official",
+            }, 200)
+        except Exception as exc:
+            return _failure("Failed to check verification status", 500, str(exc))
