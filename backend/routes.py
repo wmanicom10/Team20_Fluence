@@ -782,9 +782,9 @@ def register_routes(app):
 
     # ── Auth endpoints (TM20-87, TM20-88) ──────────────────────────────
 
-    @app.post(f"{API_PREFIX}/auth/signup")
-    def auth_signup():
-        """TM20-87: Create a new user account via Supabase Auth."""
+    @app.post(f"{API_PREFIX}/auth/_legacy-signup")
+    def auth_signup_legacy():
+        """Legacy auth signup route retained after merge cleanup."""
         payload, error_response = _require_json_body()
         if error_response:
             return error_response
@@ -815,9 +815,9 @@ def register_routes(app):
                 return _failure("An account with this email already exists", 409)
             return _failure("Signup failed", 500, msg)
 
-    @app.post(f"{API_PREFIX}/auth/login")
-    def auth_login():
-        """TM20-87: Authenticate an existing user via Supabase Auth."""
+    @app.post(f"{API_PREFIX}/auth/_legacy-login")
+    def auth_login_legacy():
+        """Legacy auth login route retained after merge cleanup."""
         payload, error_response = _require_json_body()
         if error_response:
             return error_response
