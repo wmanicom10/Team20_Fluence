@@ -18,6 +18,7 @@ class Config:
     # Frontend integration
     CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
 
-    # External API caching (TM20-105)
-    EXTERNAL_API_CACHE_TTL_SECONDS = int(os.getenv("EXTERNAL_API_CACHE_TTL_SECONDS", "120"))
-    EXTERNAL_API_TIMEOUT_SECONDS = int(os.getenv("EXTERNAL_API_TIMEOUT_SECONDS", "8"))
+
+    # Baseline AI pipeline
+    AI_MODEL_VERSION = os.getenv("AI_MODEL_VERSION", "baseline-v1")
+    AI_AUTO_TRAIN_ON_READ = os.getenv("AI_AUTO_TRAIN_ON_READ", "true").lower() == "true"

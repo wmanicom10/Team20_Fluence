@@ -1,25 +1,13 @@
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
-import json
-import re
-import threading
-import time
-from urllib import error as urllib_error
-from urllib import parse as urllib_parse
-from urllib import request as urllib_request
+from datetime import datetime
 
 from flask import current_app, jsonify, request
 
+from ai_integration import get_or_train_ai_pipeline, train_ai_pipeline
 from db import get_supabase_client
 
 
 API_PREFIX = "/api"
-EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-MIN_PASSWORD_LENGTH = 8
-DEFAULT_EXTERNAL_API_CACHE_TTL_SECONDS = 120
-DEFAULT_EXTERNAL_API_TIMEOUT_SECONDS = 8
-EXTERNAL_DISEASE_SH_BASE = "https://disease.sh/v3/covid-19"
-ALLOWED_EXTERNAL_SORT_FIELDS = {"cases", "deaths", "recovered"}
 
 ALLOWED_CASE_UPDATE_FIELDS = {
     "disease_id",
@@ -56,13 +44,6 @@ SEVERITY_LABELS = {
     4: "Critical",
 }
 
-AI_RISK_WINDOW_DAYS = 7
-AI_RISK_MAX_WINDOW_DAYS = 30
-
-
-_external_api_cache_lock = threading.Lock()
-_external_api_cache = {}
-
 
 def _success(data, status_code=200):
     return jsonify({"status": "success", "data": data}), status_code
@@ -80,94 +61,6 @@ def _require_json_body():
     if not isinstance(payload, dict):
         return None, _failure("Request body must be valid JSON", 400)
     return payload, None
-
-
-def _require_fields(payload, required_fields):
-    missing = sorted(field for field in required_fields if field not in payload)
-    if missing:
-        return _failure("Missing required fields", 400, {"missing": missing})
-    return None
-
-
-def _require_non_empty_string(value, field_name):
-    if not isinstance(value, str) or not value.strip():
-        return None, _failure(f"{field_name} must be a non-empty string", 400)
-    return value.strip(), None
-
-
-def _validate_email(email):
-    normalized_email, error_response = _require_non_empty_string(email, "email")
-    if error_response:
-        return None, error_response
-    if not EMAIL_REGEX.match(normalized_email):
-        return None, _failure("email must be a valid email address", 400)
-    return normalized_email.lower(), None
-
-
-def _validate_password(password):
-    normalized_password, error_response = _require_non_empty_string(password, "password")
-    if error_response:
-        return None, error_response
-    if len(normalized_password) < MIN_PASSWORD_LENGTH:
-        return None, _failure(
-            f"password must be at least {MIN_PASSWORD_LENGTH} characters long",
-            400,
-        )
-    return normalized_password, None
-
-
-def _serialize_auth_result(result):
-    user = getattr(result, "user", None)
-    session = getattr(result, "session", None)
-
-    user_data = None
-    if user is not None:
-        user_metadata = getattr(user, "user_metadata", None) or {}
-        user_data = {
-            "id": getattr(user, "id", None),
-            "email": getattr(user, "email", None),
-            "email_confirmed_at": getattr(user, "email_confirmed_at", None),
-            "last_sign_in_at": getattr(user, "last_sign_in_at", None),
-            "name": user_metadata.get("name"),
-        }
-
-    session_data = None
-    if session is not None:
-        session_data = {
-            "access_token": getattr(session, "access_token", None),
-            "refresh_token": getattr(session, "refresh_token", None),
-            "token_type": getattr(session, "token_type", None),
-            "expires_in": getattr(session, "expires_in", None),
-            "expires_at": getattr(session, "expires_at", None),
-        }
-
-    return {
-        "user": user_data,
-        "session": session_data,
-    }
-
-
-def _upsert_user_profile(client, auth_user, full_name, update_last_login=False):
-    if auth_user is None:
-        return
-
-    upsert_payload = {
-        "user_id": getattr(auth_user, "id", None),
-        "email": getattr(auth_user, "email", None),
-        "role": "public",
-    }
-
-    if update_last_login:
-        last_sign_in_at = getattr(auth_user, "last_sign_in_at", None)
-        if last_sign_in_at:
-            upsert_payload["last_login"] = last_sign_in_at
-
-    user_metadata = getattr(auth_user, "user_metadata", None) or {}
-    name_value = full_name or user_metadata.get("name")
-    if name_value:
-        upsert_payload["full_name"] = name_value
-
-    client.table("users").upsert(upsert_payload, on_conflict="user_id").execute()
 
 
 def _validate_iso_date(value, field_name):
@@ -196,159 +89,6 @@ def _parse_int(value, field_name):
         return int(value), None
     except (TypeError, ValueError):
         return None, _failure(f"{field_name} must be an integer", 400)
-
-
-def _parse_external_bool(value, default=False):
-    if value is None:
-        return default
-
-    lowered = str(value).strip().lower()
-    if lowered in {"1", "true", "yes", "y", "on"}:
-        return True
-    if lowered in {"0", "false", "no", "n", "off"}:
-        return False
-    return default
-
-
-def _parse_countries(countries_param):
-    if not countries_param:
-        return []
-
-    countries = []
-    seen = set()
-    for raw_value in str(countries_param).split(","):
-        normalized = raw_value.strip().upper()
-        if not normalized:
-            continue
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        countries.append(normalized)
-    return countries
-
-
-def _get_external_cache_ttl_seconds():
-    ttl_value = current_app.config.get(
-        "EXTERNAL_API_CACHE_TTL_SECONDS",
-        DEFAULT_EXTERNAL_API_CACHE_TTL_SECONDS,
-    )
-    try:
-        ttl_seconds = int(ttl_value)
-    except (TypeError, ValueError):
-        ttl_seconds = DEFAULT_EXTERNAL_API_CACHE_TTL_SECONDS
-    return max(1, ttl_seconds)
-
-
-def _get_external_timeout_seconds():
-    timeout_value = current_app.config.get(
-        "EXTERNAL_API_TIMEOUT_SECONDS",
-        DEFAULT_EXTERNAL_API_TIMEOUT_SECONDS,
-    )
-    try:
-        timeout_seconds = int(timeout_value)
-    except (TypeError, ValueError):
-        timeout_seconds = DEFAULT_EXTERNAL_API_TIMEOUT_SECONDS
-    return max(1, timeout_seconds)
-
-
-def _build_external_countries_url(args):
-    query_params = urllib_parse.parse_qsl(args.decode("utf-8"), keep_blank_values=False)
-    params_dict = {key: value for key, value in query_params}
-
-    allow_null = _parse_external_bool(params_dict.get("allowNull"), True)
-    yesterday = _parse_external_bool(params_dict.get("yesterday"), False)
-    two_days_ago = _parse_external_bool(params_dict.get("twoDaysAgo"), False)
-
-    sort_value = str(params_dict.get("sort") or "cases").strip().lower()
-    if sort_value not in ALLOWED_EXTERNAL_SORT_FIELDS:
-        sort_value = "cases"
-
-    countries = _parse_countries(params_dict.get("countries"))
-    endpoint_path = "/countries"
-    if countries:
-        endpoint_path = f"/countries/{urllib_parse.quote(','.join(countries))}"
-
-    upstream_params = {
-        "allowNull": "true" if allow_null else "false",
-        "sort": sort_value,
-    }
-    if yesterday:
-        upstream_params["yesterday"] = "true"
-    if two_days_ago:
-        upstream_params["twoDaysAgo"] = "true"
-
-    upstream_query = urllib_parse.urlencode(upstream_params)
-    upstream_url = f"{EXTERNAL_DISEASE_SH_BASE}{endpoint_path}?{upstream_query}"
-
-    return {
-        "upstream_url": upstream_url,
-        "filters": {
-            "allowNull": allow_null,
-            "yesterday": yesterday,
-            "twoDaysAgo": two_days_ago,
-            "sort": sort_value,
-            "countries": countries,
-        },
-    }
-
-
-def _cache_get(cache_key):
-    with _external_api_cache_lock:
-        entry = _external_api_cache.get(cache_key)
-
-    if not entry:
-        return None, None
-
-    now = time.time()
-    if entry["expires_at"] > now:
-        return entry, True
-    return entry, False
-
-
-def _cache_set(cache_key, payload, ttl_seconds):
-    now = time.time()
-    entry = {
-        "payload": payload,
-        "created_at": now,
-        "expires_at": now + ttl_seconds,
-    }
-    with _external_api_cache_lock:
-        _external_api_cache[cache_key] = entry
-    return entry
-
-
-def _to_utc_iso(timestamp):
-    return datetime.fromtimestamp(timestamp, timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _utc_now_iso():
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _fetch_external_json(upstream_url):
-    request_obj = urllib_request.Request(
-        upstream_url,
-        headers={"Accept": "application/json", "User-Agent": "fluence-backend/1.0"},
-    )
-
-    with urllib_request.urlopen(request_obj, timeout=_get_external_timeout_seconds()) as response:
-        status_code = getattr(response, "status", 200)
-        if status_code < 200 or status_code >= 300:
-            raise urllib_error.HTTPError(
-                upstream_url,
-                status_code,
-                f"Unexpected status {status_code}",
-                hdrs=None,
-                fp=None,
-            )
-
-        raw_body = response.read().decode("utf-8")
-        parsed_body = json.loads(raw_body)
-        if isinstance(parsed_body, list):
-            return parsed_body
-        if isinstance(parsed_body, dict):
-            return [parsed_body]
-        return []
 
 
 def _get_disease_id_by_name(client, disease_name):
@@ -465,246 +205,7 @@ def _format_for_frontend(rows):
     return sorted(formatted, key=lambda item: item["caseCount"], reverse=True)
 
 
-def _serialize_location(row):
-    return {
-        "location_id": row.get("location_id"),
-        "city": row.get("city"),
-        "state_province": row.get("state_province"),
-        "country": row.get("country"),
-        "latitude": row.get("latitude"),
-        "longitude": row.get("longitude"),
-        "region_type": row.get("region_type"),
-    }
-
-
-def _resolve_location(client, location_id=None, city=None, state_province=None, country=None):
-    query = client.table("locations").select(
-        "location_id,city,state_province,country,latitude,longitude,region_type"
-    )
-
-    if location_id is not None:
-        query = query.eq("location_id", location_id)
-    else:
-        query = query.eq("city", city)
-        if state_province:
-            query = query.eq("state_province", state_province)
-        if country:
-            query = query.eq("country", country)
-
-    result = query.limit(1).execute()
-    if not result.data:
-        return None
-    return result.data[0]
-
-
-def _risk_level_from_score(score):
-    if score >= 6:
-        return "Critical"
-    if score >= 4:
-        return "High"
-    if score >= 2:
-        return "Medium"
-    return "Low"
-
-
-def _build_ai_risk_output(rows, location_row, as_of_date, window_days, verified_only):
-    per_disease = defaultdict(lambda: {
-        "total_cases": 0,
-        "latest_reported_date": None,
-        "severity_score": 1,
-        "severity_raw": None,
-    })
-    total_cases = 0
-    latest_reported_date = None
-    latest_day_cases = 0
-    previous_window_cases = 0
-    max_severity_score = 1
-
-    for row in rows:
-        date_reported = row.get("date_reported")
-        if not date_reported:
-            continue
-
-        try:
-            row_date = datetime.strptime(date_reported, "%Y-%m-%d").date()
-        except ValueError:
-            continue
-
-        case_count = int(row.get("case_count") or 0)
-        disease_name = _extract_nested_name(row, "diseases", "disease_name") or "Unknown"
-        raw_severity = row.get("severity")
-        severity_score = SEVERITY_SCORES.get(str(raw_severity).lower(), 1) if raw_severity else 1
-
-        total_cases += case_count
-        max_severity_score = max(max_severity_score, severity_score)
-        latest_reported_date = max(latest_reported_date, row_date) if latest_reported_date else row_date
-
-        if row_date == as_of_date:
-            latest_day_cases += case_count
-        else:
-            previous_window_cases += case_count
-
-        disease_entry = per_disease[disease_name]
-        disease_entry["total_cases"] += case_count
-        disease_entry["severity_score"] = max(disease_entry["severity_score"], severity_score)
-        if raw_severity:
-            disease_entry["severity_raw"] = raw_severity
-        if disease_entry["latest_reported_date"] is None or row_date > disease_entry["latest_reported_date"]:
-            disease_entry["latest_reported_date"] = row_date
-
-    trend_percentage = 0.0
-    if previous_window_cases > 0:
-        trend_percentage = round(((latest_day_cases - previous_window_cases) / previous_window_cases) * 100, 1)
-    elif latest_day_cases > 0:
-        trend_percentage = 100.0
-
-    risk_score = 0
-    if total_cases >= 500:
-        risk_score += 3
-    elif total_cases >= 200:
-        risk_score += 2
-    elif total_cases >= 75:
-        risk_score += 1
-
-    if trend_percentage >= 100:
-        risk_score += 2
-    elif trend_percentage >= 25:
-        risk_score += 1
-
-    if max_severity_score >= 4:
-        risk_score += 2
-    elif max_severity_score >= 3:
-        risk_score += 1
-
-    diseases = [
-        {
-            "disease": disease_name,
-            "total_cases": item["total_cases"],
-            "latest_reported_date": (
-                item["latest_reported_date"].isoformat() if item["latest_reported_date"] else None
-            ),
-            "severity": _normalize_severity(item["severity_raw"], item["total_cases"]),
-        }
-        for disease_name, item in sorted(
-            per_disease.items(),
-            key=lambda pair: pair[1]["total_cases"],
-            reverse=True,
-        )
-    ]
-
-    highest_severity = "Low"
-    if total_cases:
-        highest_severity = SEVERITY_LABELS.get(max_severity_score, "Low")
-
-    return {
-        "location": _serialize_location(location_row),
-        "as_of_date": as_of_date.isoformat(),
-        "window_days": window_days,
-        "filters": {
-            "verified_only": verified_only,
-        },
-        "summary": {
-            "total_cases": total_cases,
-            "disease_count": len(diseases),
-            "latest_reported_date": latest_reported_date.isoformat() if latest_reported_date else None,
-            "latest_day_cases": latest_day_cases,
-            "previous_window_cases": previous_window_cases,
-            "trend_percentage": trend_percentage,
-            "highest_severity": highest_severity,
-            "risk_score": risk_score,
-            "risk_level": _risk_level_from_score(risk_score),
-        },
-        "diseases": diseases,
-    }
-
-
 def register_routes(app):
-    @app.post(f"{API_PREFIX}/auth/signup")
-    def auth_signup():
-        payload, error_response = _require_json_body()
-        if error_response:
-            return error_response
-
-        required_error = _require_fields(payload, {"name", "email", "password"})
-        if required_error:
-            return required_error
-
-        full_name, error_response = _require_non_empty_string(payload.get("name"), "name")
-        if error_response:
-            return error_response
-
-        email, error_response = _validate_email(payload.get("email"))
-        if error_response:
-            return error_response
-
-        password, error_response = _validate_password(payload.get("password"))
-        if error_response:
-            return error_response
-
-        try:
-            client = get_supabase_client(current_app)
-            result = client.auth.sign_up({
-                "email": email,
-                "password": password,
-                "options": {
-                    "data": {
-                        "name": full_name,
-                    }
-                },
-            })
-
-            try:
-                _upsert_user_profile(client, getattr(result, "user", None), full_name)
-            except Exception:
-                pass
-
-            return _success(_serialize_auth_result(result), 201)
-        except Exception as exc:
-            return _failure("Failed to create account", 500, str(exc))
-
-    @app.post(f"{API_PREFIX}/auth/login")
-    def auth_login():
-        payload, error_response = _require_json_body()
-        if error_response:
-            return error_response
-
-        required_error = _require_fields(payload, {"email", "password"})
-        if required_error:
-            return required_error
-
-        email, error_response = _validate_email(payload.get("email"))
-        if error_response:
-            return error_response
-
-        password, error_response = _require_non_empty_string(payload.get("password"), "password")
-        if error_response:
-            return error_response
-
-        try:
-            client = get_supabase_client(current_app)
-            result = client.auth.sign_in_with_password({
-                "email": email,
-                "password": password,
-            })
-
-            try:
-                _upsert_user_profile(
-                    client,
-                    getattr(result, "user", None),
-                    None,
-                    update_last_login=True,
-                )
-            except Exception:
-                pass
-
-            return _success(_serialize_auth_result(result), 200)
-        except Exception as exc:
-            message = str(exc)
-            lowered = message.lower()
-            if "invalid login credentials" in lowered or "email not confirmed" in lowered:
-                return _failure("Invalid email or password", 401, message)
-            return _failure("Failed to log in", 500, message)
-
     @app.get(f"{API_PREFIX}/health")
     def health():
         try:
@@ -1071,6 +572,65 @@ def register_routes(app):
         except Exception as exc:
             return _failure("Failed to load UI disease types", 500, str(exc))
 
+    @app.post(f"{API_PREFIX}/ai/train")
+    def ai_train():
+        try:
+            payload = request.get_json(silent=True) or {}
+            trained = train_ai_pipeline(current_app, filters=payload)
+            return _success({
+                "model": {
+                    "model_version": trained["model"].get("model_version"),
+                    "generated_at": trained["model"].get("generated_at"),
+                    "training_examples": trained["model"].get("training_examples"),
+                },
+                "validation": trained["validation"].get("meta"),
+                "risk_output_count": len(trained["risk_output"]),
+            }, 200)
+        except ValueError as exc:
+            return _failure("Invalid AI training request", 400, str(exc))
+        except Exception as exc:
+            return _failure("Failed to train AI pipeline", 500, str(exc))
+
+    @app.get(f"{API_PREFIX}/ai/risk-output")
+    def ai_risk_output():
+        try:
+            filters = {
+                "disease": request.args.get("disease"),
+                "startDate": request.args.get("startDate"),
+                "endDate": request.args.get("endDate"),
+                "verified_only": request.args.get("verified_only"),
+            }
+            trained = get_or_train_ai_pipeline(current_app, filters=filters)
+            return _success({
+                "model": {
+                    "model_version": trained["model"].get("model_version"),
+                    "generated_at": trained["model"].get("generated_at"),
+                    "training_examples": trained["model"].get("training_examples"),
+                },
+                "validation": trained["validation"].get("meta"),
+                "items": trained["risk_output"],
+            }, 200)
+        except ValueError as exc:
+            return _failure("Invalid AI risk request", 400, str(exc))
+        except Exception as exc:
+            return _failure("Failed to build AI risk output", 500, str(exc))
+
+    @app.get(f"{API_PREFIX}/ui/ai-risk")
+    def ui_ai_risk():
+        try:
+            filters = {
+                "disease": request.args.get("disease"),
+                "startDate": request.args.get("startDate"),
+                "endDate": request.args.get("endDate"),
+                "verified_only": request.args.get("verified_only"),
+            }
+            trained = get_or_train_ai_pipeline(current_app, filters=filters)
+            return _success(trained["risk_output"], 200)
+        except ValueError as exc:
+            return _failure("Invalid AI dashboard request", 400, str(exc))
+        except Exception as exc:
+            return _failure("Failed to load dashboard AI risk output", 500, str(exc))
+
     @app.get(f"{API_PREFIX}/metrics/cases-by-disease")
     def cases_by_disease_stats():
         try:
@@ -1102,301 +662,3 @@ def register_routes(app):
             return _success(data, 200)
         except Exception as exc:
             return _failure("Failed to compute case metrics", 500, str(exc))
-
-    @app.get(f"{API_PREFIX}/external/covid/countries")
-    def external_covid_countries():
-        """TM20-105: Cached proxy for common disease.sh country requests."""
-        try:
-            request_info = _build_external_countries_url(request.query_string)
-            upstream_url = request_info["upstream_url"]
-            ttl_seconds = _get_external_cache_ttl_seconds()
-
-            cached_entry, is_fresh = _cache_get(upstream_url)
-            if cached_entry and is_fresh:
-                return _success({
-                    "source": "disease.sh",
-                    "filters": request_info["filters"],
-                    "rows": cached_entry["payload"],
-                    "cache": {
-                        "hit": True,
-                        "stale_fallback": False,
-                        "ttl_seconds": ttl_seconds,
-                        "cached_at": _to_utc_iso(cached_entry["created_at"]),
-                        "expires_at": _to_utc_iso(cached_entry["expires_at"]),
-                    },
-                    "meta": {
-                        "upstream": upstream_url,
-                        "generated_at": _utc_now_iso(),
-                    },
-                }, 200)
-
-            payload = _fetch_external_json(upstream_url)
-            stored_entry = _cache_set(upstream_url, payload, ttl_seconds)
-
-            return _success({
-                "source": "disease.sh",
-                "filters": request_info["filters"],
-                "rows": payload,
-                "cache": {
-                    "hit": False,
-                    "stale_fallback": False,
-                    "ttl_seconds": ttl_seconds,
-                    "cached_at": _to_utc_iso(stored_entry["created_at"]),
-                    "expires_at": _to_utc_iso(stored_entry["expires_at"]),
-                },
-                "meta": {
-                    "upstream": upstream_url,
-                    "generated_at": _utc_now_iso(),
-                },
-            }, 200)
-        except Exception as exc:
-            request_info = _build_external_countries_url(request.query_string)
-            stale_entry, _ = _cache_get(request_info["upstream_url"])
-            if stale_entry:
-                return _success({
-                    "source": "disease.sh",
-                    "filters": request_info["filters"],
-                    "rows": stale_entry["payload"],
-                    "cache": {
-                        "hit": False,
-                        "stale_fallback": True,
-                        "ttl_seconds": _get_external_cache_ttl_seconds(),
-                        "cached_at": _to_utc_iso(stale_entry["created_at"]),
-                        "expires_at": _to_utc_iso(stale_entry["expires_at"]),
-                    },
-                    "meta": {
-                        "upstream": request_info["upstream_url"],
-                        "generated_at": _utc_now_iso(),
-                        "warning": f"Upstream request failed; returned stale cache: {exc}",
-                    },
-                }, 200)
-
-            return _failure("Failed to load external disease data", 502, str(exc))
-
-    @app.get(f"{API_PREFIX}/ai/risk-output")
-    def ai_risk_output():
-        date_value = request.args.get("date")
-        if not date_value:
-            return _failure("date query parameter is required", 400)
-
-        date_error = _validate_iso_date(date_value, "date")
-        if date_error:
-            return date_error
-        as_of_date = datetime.strptime(date_value, "%Y-%m-%d").date()
-
-        window_days = AI_RISK_WINDOW_DAYS
-        if request.args.get("window_days") is not None:
-            window_days, parse_error = _parse_int(request.args.get("window_days"), "window_days")
-            if parse_error:
-                return parse_error
-            if window_days < 1 or window_days > AI_RISK_MAX_WINDOW_DAYS:
-                return _failure(
-                    f"window_days must be between 1 and {AI_RISK_MAX_WINDOW_DAYS}",
-                    400,
-                )
-
-        verified_only = True
-        if request.args.get("verified_only") is not None:
-            verified_only, bool_error = _parse_bool(request.args.get("verified_only"), "verified_only")
-            if bool_error:
-                return bool_error
-
-        location_id = request.args.get("location_id")
-        city = request.args.get("city")
-        state_province = request.args.get("state_province")
-        country = request.args.get("country")
-
-        parsed_location_id = None
-        if location_id is not None:
-            parsed_location_id, parse_error = _parse_int(location_id, "location_id")
-            if parse_error:
-                return parse_error
-        else:
-            city, error_response = _require_non_empty_string(city, "city")
-            if error_response:
-                return _failure(
-                    "Provide either location_id or city (with optional state_province/country)",
-                    400,
-                )
-
-        try:
-            client = get_supabase_client(current_app)
-            location_row = _resolve_location(
-                client,
-                location_id=parsed_location_id,
-                city=city,
-                state_province=state_province,
-                country=country,
-            )
-            if not location_row:
-                return _failure("Location not found", 404)
-
-            start_date = (as_of_date - timedelta(days=window_days - 1)).isoformat()
-            query = (
-                client.table("cases")
-                .select("case_count,date_reported,severity,verified,diseases(name)")
-                .eq("location_id", location_row["location_id"])
-                .gte("date_reported", start_date)
-                .lte("date_reported", as_of_date.isoformat())
-            )
-
-            if verified_only:
-                query = query.eq("verified", True)
-
-            result = query.execute()
-            payload = _build_ai_risk_output(
-                result.data or [],
-                location_row,
-                as_of_date,
-                window_days,
-                verified_only,
-            )
-            return _success(payload, 200)
-        except Exception as exc:
-            return _failure("Failed to build AI risk output", 500, str(exc))
-
-    # ── Auth endpoints (TM20-87, TM20-88) ──────────────────────────────
-
-    @app.post(f"{API_PREFIX}/auth/_legacy-signup")
-    def auth_signup_legacy():
-        """Legacy auth signup route retained after merge cleanup."""
-        payload, error_response = _require_json_body()
-        if error_response:
-            return error_response
-
-        email = payload.get("email", "").strip()
-        password = payload.get("password", "")
-
-        if not email:
-            return _failure("email is required", 400)
-        if not password or len(password) < 6:
-            return _failure("password must be at least 6 characters", 400)
-
-        try:
-            client = get_supabase_client(current_app)
-            result = client.auth.sign_up({"email": email, "password": password})
-
-            if hasattr(result, "user") and result.user:
-                return _success({
-                    "user_id": str(result.user.id),
-                    "email": result.user.email,
-                    "message": "Account created. Check your email for verification.",
-                }, 201)
-
-            return _failure("Signup failed - please try again", 400)
-        except Exception as exc:
-            msg = str(exc)
-            if "already registered" in msg.lower():
-                return _failure("An account with this email already exists", 409)
-            return _failure("Signup failed", 500, msg)
-
-    @app.post(f"{API_PREFIX}/auth/_legacy-login")
-    def auth_login_legacy():
-        """Legacy auth login route retained after merge cleanup."""
-        payload, error_response = _require_json_body()
-        if error_response:
-            return error_response
-
-        email = payload.get("email", "").strip()
-        password = payload.get("password", "")
-
-        if not email:
-            return _failure("email is required", 400)
-        if not password:
-            return _failure("password is required", 400)
-
-        try:
-            client = get_supabase_client(current_app)
-            result = client.auth.sign_in_with_password({"email": email, "password": password})
-
-            if hasattr(result, "session") and result.session:
-                return _success({
-                    "user_id": str(result.user.id),
-                    "email": result.user.email,
-                    "access_token": result.session.access_token,
-                    "refresh_token": result.session.refresh_token,
-                    "role": "user",
-                }, 200)
-
-            return _failure("Invalid email or password", 401)
-        except Exception as exc:
-            msg = str(exc)
-            if "invalid" in msg.lower() or "credentials" in msg.lower():
-                return _failure("Invalid email or password", 401)
-            return _failure("Login failed", 500, msg)
-
-    REQUIRED_VERIFY_FIELDS = {"full_name", "email", "license_number",
-                              "issuing_state", "organization"}
-
-    @app.post(f"{API_PREFIX}/auth/verify-official")
-    def auth_verify_official():
-        """TM20-88: Submit health-official credentials for verification."""
-        payload, error_response = _require_json_body()
-        if error_response:
-            return error_response
-
-        missing = sorted(REQUIRED_VERIFY_FIELDS - set(payload.keys()))
-        if missing:
-            return _failure("Missing required fields", 400, {"missing": missing})
-
-        for field in REQUIRED_VERIFY_FIELDS:
-            value = payload.get(field)
-            if not isinstance(value, str) or not value.strip():
-                return _failure(f"{field} must be a non-empty string", 400)
-
-        try:
-            client = get_supabase_client(current_app)
-            record = {
-                "full_name": payload["full_name"].strip(),
-                "email": payload["email"].strip(),
-                "license_number": payload["license_number"].strip(),
-                "issuing_state": payload["issuing_state"].strip(),
-                "organization": payload["organization"].strip(),
-                "title": (payload.get("title") or "").strip() or None,
-                "verified": False,
-                "submitted_at": datetime.now(timezone.utc).isoformat(),
-            }
-            result = (
-                client.table("official_verifications")
-                .insert(record)
-                .execute()
-            )
-            return _success({
-                "message": "Verification request submitted successfully.",
-                "verification_status": "pending",
-                "role": "pending_official",
-            }, 201)
-        except Exception as exc:
-            return _failure("Failed to submit verification request", 500, str(exc))
-
-    @app.get(f"{API_PREFIX}/auth/verify-official/status")
-    def auth_verify_official_status():
-        """TM20-89: Check health-official verification status by email."""
-        email = request.args.get("email", "").strip()
-        if not email:
-            return _failure("email query parameter is required", 400)
-
-        try:
-            client = get_supabase_client(current_app)
-            result = (
-                client.table("official_verifications")
-                .select("verified")
-                .eq("email", email)
-                .order("submitted_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-
-            if not result.data:
-                return _success({
-                    "verification_status": "none",
-                    "role": "user",
-                }, 200)
-
-            is_verified = result.data[0].get("verified", False)
-            return _success({
-                "verification_status": "verified" if is_verified else "pending",
-                "role": "health_official" if is_verified else "pending_official",
-            }, 200)
-        except Exception as exc:
-            return _failure("Failed to check verification status", 500, str(exc))
