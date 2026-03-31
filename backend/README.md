@@ -54,6 +54,8 @@ SUPABASE_KEY=YOUR_SUPABASE_KEY
 FLASK_DEBUG=true
 SECRET_KEY=dev-key
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+EXTERNAL_API_CACHE_TTL_SECONDS=120
+EXTERNAL_API_TIMEOUT_SECONDS=8
 ```
 
 Run:
@@ -73,6 +75,8 @@ python app.py
 - `GET/POST /api/cases`
 - `GET/PATCH/DELETE /api/cases/<case_id>`
 - `GET /api/metrics/cases-by-disease`
+- `GET /api/external/covid/countries`
 
 Auth request/response examples are documented in [docs/auth-endpoints.md](../docs/auth-endpoints.md).
 Health official verification request/response examples are documented in [docs/health-official-verification-endpoint.md](../docs/health-official-verification-endpoint.md).
+AI/risk and cache endpoint examples are documented in [docs/ai-risk-features.md](../docs/ai-risk-features.md).
