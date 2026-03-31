@@ -18,6 +18,7 @@ The frontend branch can replace mock data with these two endpoints directly:
 
 - `GET /api/ui/disease-data`
 - `GET /api/ui/disease-types`
+- `GET /api/ai/risk-output`
 
 `/api/ui/disease-data` supports query params used by UI filters:
 - `disease` (example: `COVID-19`, or `All Diseases`)

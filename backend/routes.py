@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import re
 import threading
@@ -55,6 +55,9 @@ SEVERITY_LABELS = {
     3: "High",
     4: "Critical",
 }
+
+AI_RISK_WINDOW_DAYS = 7
+AI_RISK_MAX_WINDOW_DAYS = 30
 
 
 _external_api_cache_lock = threading.Lock()
@@ -460,6 +463,159 @@ def _format_for_frontend(rows):
         next_id += 1
 
     return sorted(formatted, key=lambda item: item["caseCount"], reverse=True)
+
+
+def _serialize_location(row):
+    return {
+        "location_id": row.get("location_id"),
+        "city": row.get("city"),
+        "state_province": row.get("state_province"),
+        "country": row.get("country"),
+        "latitude": row.get("latitude"),
+        "longitude": row.get("longitude"),
+        "region_type": row.get("region_type"),
+    }
+
+
+def _resolve_location(client, location_id=None, city=None, state_province=None, country=None):
+    query = client.table("locations").select(
+        "location_id,city,state_province,country,latitude,longitude,region_type"
+    )
+
+    if location_id is not None:
+        query = query.eq("location_id", location_id)
+    else:
+        query = query.eq("city", city)
+        if state_province:
+            query = query.eq("state_province", state_province)
+        if country:
+            query = query.eq("country", country)
+
+    result = query.limit(1).execute()
+    if not result.data:
+        return None
+    return result.data[0]
+
+
+def _risk_level_from_score(score):
+    if score >= 6:
+        return "Critical"
+    if score >= 4:
+        return "High"
+    if score >= 2:
+        return "Medium"
+    return "Low"
+
+
+def _build_ai_risk_output(rows, location_row, as_of_date, window_days, verified_only):
+    per_disease = defaultdict(lambda: {
+        "total_cases": 0,
+        "latest_reported_date": None,
+        "severity_score": 1,
+        "severity_raw": None,
+    })
+    total_cases = 0
+    latest_reported_date = None
+    latest_day_cases = 0
+    previous_window_cases = 0
+    max_severity_score = 1
+
+    for row in rows:
+        date_reported = row.get("date_reported")
+        if not date_reported:
+            continue
+
+        try:
+            row_date = datetime.strptime(date_reported, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+
+        case_count = int(row.get("case_count") or 0)
+        disease_name = _extract_nested_name(row, "diseases", "disease_name") or "Unknown"
+        raw_severity = row.get("severity")
+        severity_score = SEVERITY_SCORES.get(str(raw_severity).lower(), 1) if raw_severity else 1
+
+        total_cases += case_count
+        max_severity_score = max(max_severity_score, severity_score)
+        latest_reported_date = max(latest_reported_date, row_date) if latest_reported_date else row_date
+
+        if row_date == as_of_date:
+            latest_day_cases += case_count
+        else:
+            previous_window_cases += case_count
+
+        disease_entry = per_disease[disease_name]
+        disease_entry["total_cases"] += case_count
+        disease_entry["severity_score"] = max(disease_entry["severity_score"], severity_score)
+        if raw_severity:
+            disease_entry["severity_raw"] = raw_severity
+        if disease_entry["latest_reported_date"] is None or row_date > disease_entry["latest_reported_date"]:
+            disease_entry["latest_reported_date"] = row_date
+
+    trend_percentage = 0.0
+    if previous_window_cases > 0:
+        trend_percentage = round(((latest_day_cases - previous_window_cases) / previous_window_cases) * 100, 1)
+    elif latest_day_cases > 0:
+        trend_percentage = 100.0
+
+    risk_score = 0
+    if total_cases >= 500:
+        risk_score += 3
+    elif total_cases >= 200:
+        risk_score += 2
+    elif total_cases >= 75:
+        risk_score += 1
+
+    if trend_percentage >= 100:
+        risk_score += 2
+    elif trend_percentage >= 25:
+        risk_score += 1
+
+    if max_severity_score >= 4:
+        risk_score += 2
+    elif max_severity_score >= 3:
+        risk_score += 1
+
+    diseases = [
+        {
+            "disease": disease_name,
+            "total_cases": item["total_cases"],
+            "latest_reported_date": (
+                item["latest_reported_date"].isoformat() if item["latest_reported_date"] else None
+            ),
+            "severity": _normalize_severity(item["severity_raw"], item["total_cases"]),
+        }
+        for disease_name, item in sorted(
+            per_disease.items(),
+            key=lambda pair: pair[1]["total_cases"],
+            reverse=True,
+        )
+    ]
+
+    highest_severity = "Low"
+    if total_cases:
+        highest_severity = SEVERITY_LABELS.get(max_severity_score, "Low")
+
+    return {
+        "location": _serialize_location(location_row),
+        "as_of_date": as_of_date.isoformat(),
+        "window_days": window_days,
+        "filters": {
+            "verified_only": verified_only,
+        },
+        "summary": {
+            "total_cases": total_cases,
+            "disease_count": len(diseases),
+            "latest_reported_date": latest_reported_date.isoformat() if latest_reported_date else None,
+            "latest_day_cases": latest_day_cases,
+            "previous_window_cases": previous_window_cases,
+            "trend_percentage": trend_percentage,
+            "highest_severity": highest_severity,
+            "risk_score": risk_score,
+            "risk_level": _risk_level_from_score(risk_score),
+        },
+        "diseases": diseases,
+    }
 
 
 def register_routes(app):
@@ -1016,6 +1172,88 @@ def register_routes(app):
                 }, 200)
 
             return _failure("Failed to load external disease data", 502, str(exc))
+
+    @app.get(f"{API_PREFIX}/ai/risk-output")
+    def ai_risk_output():
+        date_value = request.args.get("date")
+        if not date_value:
+            return _failure("date query parameter is required", 400)
+
+        date_error = _validate_iso_date(date_value, "date")
+        if date_error:
+            return date_error
+        as_of_date = datetime.strptime(date_value, "%Y-%m-%d").date()
+
+        window_days = AI_RISK_WINDOW_DAYS
+        if request.args.get("window_days") is not None:
+            window_days, parse_error = _parse_int(request.args.get("window_days"), "window_days")
+            if parse_error:
+                return parse_error
+            if window_days < 1 or window_days > AI_RISK_MAX_WINDOW_DAYS:
+                return _failure(
+                    f"window_days must be between 1 and {AI_RISK_MAX_WINDOW_DAYS}",
+                    400,
+                )
+
+        verified_only = True
+        if request.args.get("verified_only") is not None:
+            verified_only, bool_error = _parse_bool(request.args.get("verified_only"), "verified_only")
+            if bool_error:
+                return bool_error
+
+        location_id = request.args.get("location_id")
+        city = request.args.get("city")
+        state_province = request.args.get("state_province")
+        country = request.args.get("country")
+
+        parsed_location_id = None
+        if location_id is not None:
+            parsed_location_id, parse_error = _parse_int(location_id, "location_id")
+            if parse_error:
+                return parse_error
+        else:
+            city, error_response = _require_non_empty_string(city, "city")
+            if error_response:
+                return _failure(
+                    "Provide either location_id or city (with optional state_province/country)",
+                    400,
+                )
+
+        try:
+            client = get_supabase_client(current_app)
+            location_row = _resolve_location(
+                client,
+                location_id=parsed_location_id,
+                city=city,
+                state_province=state_province,
+                country=country,
+            )
+            if not location_row:
+                return _failure("Location not found", 404)
+
+            start_date = (as_of_date - timedelta(days=window_days - 1)).isoformat()
+            query = (
+                client.table("cases")
+                .select("case_count,date_reported,severity,verified,diseases(name)")
+                .eq("location_id", location_row["location_id"])
+                .gte("date_reported", start_date)
+                .lte("date_reported", as_of_date.isoformat())
+            )
+
+            if verified_only:
+                query = query.eq("verified", True)
+
+            result = query.execute()
+            payload = _build_ai_risk_output(
+                result.data or [],
+                location_row,
+                as_of_date,
+                window_days,
+                verified_only,
+            )
+            return _success(payload, 200)
+        except Exception as exc:
+            return _failure("Failed to build AI risk output", 500, str(exc))
 
     # ── Auth endpoints (TM20-87, TM20-88) ──────────────────────────────
 
