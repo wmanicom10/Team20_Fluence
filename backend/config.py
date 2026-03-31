@@ -17,3 +17,7 @@ class Config:
 
     # Frontend integration
     CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+
+    # External API caching (TM20-105)
+    EXTERNAL_API_CACHE_TTL_SECONDS = int(os.getenv("EXTERNAL_API_CACHE_TTL_SECONDS", "120"))
+    EXTERNAL_API_TIMEOUT_SECONDS = int(os.getenv("EXTERNAL_API_TIMEOUT_SECONDS", "8"))

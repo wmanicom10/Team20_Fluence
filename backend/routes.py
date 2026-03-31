@@ -1,6 +1,12 @@
 from collections import defaultdict
 from datetime import datetime, timezone
+import json
 import re
+import threading
+import time
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 from flask import current_app, jsonify, request
 
@@ -10,6 +16,10 @@ from db import get_supabase_client
 API_PREFIX = "/api"
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 MIN_PASSWORD_LENGTH = 8
+DEFAULT_EXTERNAL_API_CACHE_TTL_SECONDS = 120
+DEFAULT_EXTERNAL_API_TIMEOUT_SECONDS = 8
+EXTERNAL_DISEASE_SH_BASE = "https://disease.sh/v3/covid-19"
+ALLOWED_EXTERNAL_SORT_FIELDS = {"cases", "deaths", "recovered"}
 
 ALLOWED_CASE_UPDATE_FIELDS = {
     "disease_id",
@@ -45,6 +55,10 @@ SEVERITY_LABELS = {
     3: "High",
     4: "Critical",
 }
+
+
+_external_api_cache_lock = threading.Lock()
+_external_api_cache = {}
 
 
 def _success(data, status_code=200):
@@ -179,6 +193,159 @@ def _parse_int(value, field_name):
         return int(value), None
     except (TypeError, ValueError):
         return None, _failure(f"{field_name} must be an integer", 400)
+
+
+def _parse_external_bool(value, default=False):
+    if value is None:
+        return default
+
+    lowered = str(value).strip().lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _parse_countries(countries_param):
+    if not countries_param:
+        return []
+
+    countries = []
+    seen = set()
+    for raw_value in str(countries_param).split(","):
+        normalized = raw_value.strip().upper()
+        if not normalized:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        countries.append(normalized)
+    return countries
+
+
+def _get_external_cache_ttl_seconds():
+    ttl_value = current_app.config.get(
+        "EXTERNAL_API_CACHE_TTL_SECONDS",
+        DEFAULT_EXTERNAL_API_CACHE_TTL_SECONDS,
+    )
+    try:
+        ttl_seconds = int(ttl_value)
+    except (TypeError, ValueError):
+        ttl_seconds = DEFAULT_EXTERNAL_API_CACHE_TTL_SECONDS
+    return max(1, ttl_seconds)
+
+
+def _get_external_timeout_seconds():
+    timeout_value = current_app.config.get(
+        "EXTERNAL_API_TIMEOUT_SECONDS",
+        DEFAULT_EXTERNAL_API_TIMEOUT_SECONDS,
+    )
+    try:
+        timeout_seconds = int(timeout_value)
+    except (TypeError, ValueError):
+        timeout_seconds = DEFAULT_EXTERNAL_API_TIMEOUT_SECONDS
+    return max(1, timeout_seconds)
+
+
+def _build_external_countries_url(args):
+    query_params = urllib_parse.parse_qsl(args.decode("utf-8"), keep_blank_values=False)
+    params_dict = {key: value for key, value in query_params}
+
+    allow_null = _parse_external_bool(params_dict.get("allowNull"), True)
+    yesterday = _parse_external_bool(params_dict.get("yesterday"), False)
+    two_days_ago = _parse_external_bool(params_dict.get("twoDaysAgo"), False)
+
+    sort_value = str(params_dict.get("sort") or "cases").strip().lower()
+    if sort_value not in ALLOWED_EXTERNAL_SORT_FIELDS:
+        sort_value = "cases"
+
+    countries = _parse_countries(params_dict.get("countries"))
+    endpoint_path = "/countries"
+    if countries:
+        endpoint_path = f"/countries/{urllib_parse.quote(','.join(countries))}"
+
+    upstream_params = {
+        "allowNull": "true" if allow_null else "false",
+        "sort": sort_value,
+    }
+    if yesterday:
+        upstream_params["yesterday"] = "true"
+    if two_days_ago:
+        upstream_params["twoDaysAgo"] = "true"
+
+    upstream_query = urllib_parse.urlencode(upstream_params)
+    upstream_url = f"{EXTERNAL_DISEASE_SH_BASE}{endpoint_path}?{upstream_query}"
+
+    return {
+        "upstream_url": upstream_url,
+        "filters": {
+            "allowNull": allow_null,
+            "yesterday": yesterday,
+            "twoDaysAgo": two_days_ago,
+            "sort": sort_value,
+            "countries": countries,
+        },
+    }
+
+
+def _cache_get(cache_key):
+    with _external_api_cache_lock:
+        entry = _external_api_cache.get(cache_key)
+
+    if not entry:
+        return None, None
+
+    now = time.time()
+    if entry["expires_at"] > now:
+        return entry, True
+    return entry, False
+
+
+def _cache_set(cache_key, payload, ttl_seconds):
+    now = time.time()
+    entry = {
+        "payload": payload,
+        "created_at": now,
+        "expires_at": now + ttl_seconds,
+    }
+    with _external_api_cache_lock:
+        _external_api_cache[cache_key] = entry
+    return entry
+
+
+def _to_utc_iso(timestamp):
+    return datetime.fromtimestamp(timestamp, timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _fetch_external_json(upstream_url):
+    request_obj = urllib_request.Request(
+        upstream_url,
+        headers={"Accept": "application/json", "User-Agent": "fluence-backend/1.0"},
+    )
+
+    with urllib_request.urlopen(request_obj, timeout=_get_external_timeout_seconds()) as response:
+        status_code = getattr(response, "status", 200)
+        if status_code < 200 or status_code >= 300:
+            raise urllib_error.HTTPError(
+                upstream_url,
+                status_code,
+                f"Unexpected status {status_code}",
+                hdrs=None,
+                fp=None,
+            )
+
+        raw_body = response.read().decode("utf-8")
+        parsed_body = json.loads(raw_body)
+        if isinstance(parsed_body, list):
+            return parsed_body
+        if isinstance(parsed_body, dict):
+            return [parsed_body]
+        return []
 
 
 def _get_disease_id_by_name(client, disease_name):
@@ -780,6 +947,76 @@ def register_routes(app):
         except Exception as exc:
             return _failure("Failed to compute case metrics", 500, str(exc))
 
+    @app.get(f"{API_PREFIX}/external/covid/countries")
+    def external_covid_countries():
+        """TM20-105: Cached proxy for common disease.sh country requests."""
+        try:
+            request_info = _build_external_countries_url(request.query_string)
+            upstream_url = request_info["upstream_url"]
+            ttl_seconds = _get_external_cache_ttl_seconds()
+
+            cached_entry, is_fresh = _cache_get(upstream_url)
+            if cached_entry and is_fresh:
+                return _success({
+                    "source": "disease.sh",
+                    "filters": request_info["filters"],
+                    "rows": cached_entry["payload"],
+                    "cache": {
+                        "hit": True,
+                        "stale_fallback": False,
+                        "ttl_seconds": ttl_seconds,
+                        "cached_at": _to_utc_iso(cached_entry["created_at"]),
+                        "expires_at": _to_utc_iso(cached_entry["expires_at"]),
+                    },
+                    "meta": {
+                        "upstream": upstream_url,
+                        "generated_at": _utc_now_iso(),
+                    },
+                }, 200)
+
+            payload = _fetch_external_json(upstream_url)
+            stored_entry = _cache_set(upstream_url, payload, ttl_seconds)
+
+            return _success({
+                "source": "disease.sh",
+                "filters": request_info["filters"],
+                "rows": payload,
+                "cache": {
+                    "hit": False,
+                    "stale_fallback": False,
+                    "ttl_seconds": ttl_seconds,
+                    "cached_at": _to_utc_iso(stored_entry["created_at"]),
+                    "expires_at": _to_utc_iso(stored_entry["expires_at"]),
+                },
+                "meta": {
+                    "upstream": upstream_url,
+                    "generated_at": _utc_now_iso(),
+                },
+            }, 200)
+        except Exception as exc:
+            request_info = _build_external_countries_url(request.query_string)
+            stale_entry, _ = _cache_get(request_info["upstream_url"])
+            if stale_entry:
+                return _success({
+                    "source": "disease.sh",
+                    "filters": request_info["filters"],
+                    "rows": stale_entry["payload"],
+                    "cache": {
+                        "hit": False,
+                        "stale_fallback": True,
+                        "ttl_seconds": _get_external_cache_ttl_seconds(),
+                        "cached_at": _to_utc_iso(stale_entry["created_at"]),
+                        "expires_at": _to_utc_iso(stale_entry["expires_at"]),
+                    },
+                    "meta": {
+                        "upstream": request_info["upstream_url"],
+                        "generated_at": _utc_now_iso(),
+                        "warning": f"Upstream request failed; returned stale cache: {exc}",
+                    },
+                }, 200)
+
+            return _failure("Failed to load external disease data", 502, str(exc))
+
     # ── Auth endpoints (TM20-87, TM20-88) ──────────────────────────────
 
     @app.post(f"{API_PREFIX}/auth/_legacy-signup")
@@ -808,7 +1045,7 @@ def register_routes(app):
                     "message": "Account created. Check your email for verification.",
                 }, 201)
 
-            return _failure("Signup failed — please try again", 400)
+            return _failure("Signup failed - please try again", 400)
         except Exception as exc:
             msg = str(exc)
             if "already registered" in msg.lower():
@@ -832,9 +1069,7 @@ def register_routes(app):
 
         try:
             client = get_supabase_client(current_app)
-            result = client.auth.sign_in_with_password(
-                {"email": email, "password": password}
-            )
+            result = client.auth.sign_in_with_password({"email": email, "password": password})
 
             if hasattr(result, "session") and result.session:
                 return _success({
