@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import DiseaseCard from '../components/DiseaseCard';
 import DiseaseTable from '../components/DiseaseTable';
+import AiRiskSummary from '../components/AiRiskSummary';
 
 /**
  * DiseaseDataView Page Component
@@ -167,6 +168,7 @@ function DiseaseDataView() {
           <span className="stat-value">{criticalCount}</span>
           <span className="stat-label">Critical</span>
         </div>
+        <AiRiskSummary apiBaseUrl={apiBaseUrl} disease={selectedDisease} />
       </section>
 
       <section className="controls">
