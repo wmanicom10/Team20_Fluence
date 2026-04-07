@@ -77,6 +77,7 @@ python app.py
 - `GET/PATCH/DELETE /api/cases/<case_id>`
 - `GET /api/metrics/cases-by-disease`
 - `GET /api/external/covid/countries`
+- `GET /api/ai/risk-output`
 
 Auth request/response examples are documented in [docs/auth-endpoints.md](../docs/auth-endpoints.md).
 Health official verification request/response examples are documented in [docs/health-official-verification-endpoint.md](../docs/health-official-verification-endpoint.md).

@@ -90,7 +90,108 @@ Example success response:
 }
 ```
 
-## Endpoint 3: Cached External API Proxy
+## Endpoint 3: AI Risk Output
+
+### GET `/api/ai/risk-output`
+
+Returns a location-based risk summary for a given date using existing case data.
+
+Why this endpoint exists:
+- gives the frontend a single backend contract for AI/risk-style summary output,
+- summarizes case totals, disease breakdown, trend, and severity into a dashboard-friendly shape,
+- handles empty result sets without requiring frontend-side aggregation.
+
+Query parameters:
+- `date` (required): `YYYY-MM-DD`
+- `location_id` (optional): numeric location id
+- `city` (optional if `location_id` provided): city name
+- `state_province` (optional): state or province name
+- `country` (optional): country name
+- `window_days` (optional): integer from `1` to `30` (default `7`)
+- `verified_only` (optional): `true` or `false` (default is `true`)
+
+Example request:
+
+```http
+GET /api/ai/risk-output?city=Boston&state_province=Massachusetts&date=2026-03-31
+```
+
+Example success response:
+
+```json
+{
+  "status": "success",
+  "data": {
+    "location": {
+      "location_id": 7,
+      "city": "Boston",
+      "state_province": "Massachusetts",
+      "country": "USA",
+      "latitude": 42.3601,
+      "longitude": -71.0589,
+      "region_type": "city"
+    },
+    "as_of_date": "2026-03-31",
+    "window_days": 7,
+    "filters": {
+      "verified_only": true
+    },
+    "summary": {
+      "total_cases": 120,
+      "disease_count": 2,
+      "latest_reported_date": "2026-03-31",
+      "latest_day_cases": 90,
+      "previous_window_cases": 30,
+      "trend_percentage": 200.0,
+      "highest_severity": "High",
+      "risk_score": 4,
+      "risk_level": "High"
+    },
+    "diseases": [
+      {
+        "disease": "Influenza A",
+        "total_cases": 90,
+        "latest_reported_date": "2026-03-31",
+        "severity": "High"
+      },
+      {
+        "disease": "COVID-19",
+        "total_cases": 30,
+        "latest_reported_date": "2026-03-29",
+        "severity": "Medium"
+      }
+    ]
+  }
+}
+```
+
+Example success response with no matching case data:
+
+```json
+{
+  "status": "success",
+  "data": {
+    "summary": {
+      "total_cases": 0,
+      "risk_level": "Low"
+    },
+    "diseases": []
+  }
+}
+```
+
+Example failure response:
+
+```json
+{
+  "status": "error",
+  "error": {
+    "message": "date query parameter is required"
+  }
+}
+```
+
+## Endpoint 4: Cached External API Proxy
 
 ### GET `/api/external/covid/countries`
 
@@ -209,5 +310,6 @@ curl "http://127.0.0.1:5000/api/external/covid/countries?countries=US,CA"
 ## Notes For New Team Members
 
 - Use `/api/ui/disease-data` for dashboard UI data, not raw Supabase tables.
+- Use `/api/ai/risk-output` when the UI needs summarized risk data for a location/date.
 - Use `/api/external/covid/countries` when you need temporary external disease snapshots.
 - Always check `data.cache` in external API responses to see whether data is fresh, cached, or stale fallback.
