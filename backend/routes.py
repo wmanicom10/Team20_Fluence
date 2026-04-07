@@ -1,3 +1,5 @@
+import hashlib
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -8,6 +10,10 @@ from db import get_supabase_client
 
 
 API_PREFIX = "/api"
+
+# --- UI disease-data endpoint cache ---
+_ui_disease_data_cache = {}
+UI_DISEASE_DATA_CACHE_TTL = 30  # seconds
 
 ALLOWED_CASE_UPDATE_FIELDS = {
     "disease_id",
@@ -518,17 +524,59 @@ def register_routes(app):
     @app.get(f"{API_PREFIX}/ui/disease-data")
     def ui_disease_data():
         try:
+            disease = request.args.get("disease")
+            start_date = request.args.get("startDate")
+            end_date = request.args.get("endDate")
+            verified_only = request.args.get("verified_only")
+            limit = request.args.get("limit")
+
+            # --- validate inputs before cache lookup ---
+            if start_date:
+                date_error = _validate_iso_date(start_date, "startDate")
+                if date_error:
+                    return date_error
+            if end_date:
+                date_error = _validate_iso_date(end_date, "endDate")
+                if date_error:
+                    return date_error
+
+            parsed_verified = True
+            if verified_only is not None:
+                parsed_verified, bool_error = _parse_bool(verified_only, "verified_only")
+                if bool_error:
+                    return bool_error
+
+            parsed_limit = None
+            if limit is not None:
+                parsed_limit, limit_error = _parse_int(limit, "limit")
+                if limit_error:
+                    return limit_error
+                if parsed_limit < 1:
+                    return _failure("limit must be >= 1", 400)
+
+            # --- cache lookup ---
+            cache_key = hashlib.md5(
+                f"{disease}|{start_date}|{end_date}|{parsed_verified}".encode()
+            ).hexdigest()
+
+            now = time.time()
+            cached = _ui_disease_data_cache.get(cache_key)
+            if cached and cached["expires_at"] > now:
+                formatted = cached["data"]
+                if parsed_limit is not None:
+                    formatted = formatted[:parsed_limit]
+                response = _success(formatted, 200)
+                response[0].headers["Cache-Control"] = f"public, max-age={UI_DISEASE_DATA_CACHE_TTL}"
+                response[0].headers["X-Cache"] = "HIT"
+                return response
+
+            # --- cache miss: query Supabase ---
             client = get_supabase_client(current_app)
             query = client.table("cases").select(
                 "case_count,date_reported,severity,"
                 "diseases(name),"
                 "locations(city,state_province)"
             )
-
-            disease = request.args.get("disease")
-            start_date = request.args.get("startDate")
-            end_date = request.args.get("endDate")
-            verified_only = request.args.get("verified_only")
 
             if disease and disease != "All Diseases":
                 disease_id = _get_disease_id_by_name(client, disease)
@@ -537,28 +585,28 @@ def register_routes(app):
                 query = query.eq("disease_id", disease_id)
 
             if start_date:
-                date_error = _validate_iso_date(start_date, "startDate")
-                if date_error:
-                    return date_error
                 query = query.gte("date_reported", start_date)
-
             if end_date:
-                date_error = _validate_iso_date(end_date, "endDate")
-                if date_error:
-                    return date_error
                 query = query.lte("date_reported", end_date)
 
-            if verified_only is not None:
-                parsed_verified, bool_error = _parse_bool(verified_only, "verified_only")
-                if bool_error:
-                    return bool_error
-                query = query.eq("verified", parsed_verified)
-            else:
-                query = query.eq("verified", True)
+            query = query.eq("verified", parsed_verified)
 
             result = query.execute()
             formatted = _format_for_frontend(result.data or [])
-            return _success(formatted, 200)
+
+            # --- store in cache ---
+            _ui_disease_data_cache[cache_key] = {
+                "data": formatted,
+                "expires_at": now + UI_DISEASE_DATA_CACHE_TTL,
+            }
+
+            if parsed_limit is not None:
+                formatted = formatted[:parsed_limit]
+
+            response = _success(formatted, 200)
+            response[0].headers["Cache-Control"] = f"public, max-age={UI_DISEASE_DATA_CACHE_TTL}"
+            response[0].headers["X-Cache"] = "MISS"
+            return response
         except Exception as exc:
             return _failure("Failed to load UI disease data", 500, str(exc))
 
