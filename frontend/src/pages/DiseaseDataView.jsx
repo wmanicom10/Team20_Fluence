@@ -49,7 +49,7 @@ function DiseaseDataView() {
       } catch (loadError) {
         if (isActive) {
           setError('');
-          const mockTypes = ['All Diseases', 'COVID-19', 'Influenza', 'Malaria', 'Tuberculosis'];
+          const mockTypes = ['All Diseases', 'COVID-19', 'Influenza', 'Malaria', 'Tuberculosis', 'Dengue Fever', 'Zika Virus', 'Cholera', 'Measles', 'Ebola'];
           setDiseaseTypes(mockTypes);
           setSelectedDisease((prev) => (mockTypes.includes(prev) ? prev : 'All Diseases'));
         }
@@ -94,12 +94,18 @@ function DiseaseDataView() {
       } catch (loadError) {
         if (isActive) {
           setError('');
-          // Realistic mock data for demo
+          // Rich, expanded mock data for impressive demo
           const mockData = [
             { id: 1, disease: 'COVID-19', location: 'Global', caseCount: 154231, date: new Date().toISOString(), severity: 'High', newCases24h: 1205, rateOfChange: 2.4 },
             { id: 2, disease: 'Influenza', location: 'North America', caseCount: 84320, date: new Date().toISOString(), severity: 'Medium', newCases24h: 400, rateOfChange: -1.2 },
             { id: 3, disease: 'Malaria', location: 'Sub-Saharan Africa', caseCount: 200500, date: new Date().toISOString(), severity: 'Critical', newCases24h: 3000, rateOfChange: 5.1 },
             { id: 4, disease: 'Tuberculosis', location: 'South Asia', caseCount: 45000, date: new Date().toISOString(), severity: 'Medium', newCases24h: 150, rateOfChange: 0.5 },
+            { id: 5, disease: 'Dengue Fever', location: 'Southeast Asia', caseCount: 15000, date: new Date().toISOString(), severity: 'High', newCases24h: 530, rateOfChange: 4.8 },
+            { id: 6, disease: 'Zika Virus', location: 'South America', caseCount: 3200, date: new Date().toISOString(), severity: 'Low', newCases24h: 12, rateOfChange: -0.4 },
+            { id: 7, disease: 'Cholera', location: 'East Africa', caseCount: 9800, date: new Date().toISOString(), severity: 'Critical', newCases24h: 450, rateOfChange: 8.2 },
+            { id: 8, disease: 'Measles', location: 'Europe', caseCount: 2100, date: new Date().toISOString(), severity: 'Medium', newCases24h: 85, rateOfChange: 1.5 },
+            { id: 9, disease: 'COVID-19', location: 'East Asia', caseCount: 88000, date: new Date().toISOString(), severity: 'High', newCases24h: 890, rateOfChange: 2.1 },
+            { id: 10, disease: 'Ebola', location: 'Central Africa', caseCount: 150, date: new Date().toISOString(), severity: 'Critical', newCases24h: 5, rateOfChange: 12.5 }
           ];
           setDiseaseData(selectedDisease !== 'All Diseases' ? mockData.filter(d => d.disease === selectedDisease) : mockData);
         }

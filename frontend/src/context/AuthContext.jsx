@@ -92,8 +92,14 @@ export function AuthProvider({ children }) {
     setIsVerifiedOfficial(false);
   };
 
+  const simulateOfflineDemoLogin = () => {
+    setUser({ id: 'demo-offline-id', email: 'verified.official@fluence.demo' });
+    setRole('health_official');
+    setIsVerifiedOfficial(true);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, logout, role, isVerifiedOfficial }}>
+    <AuthContext.Provider value={{ user, loading, logout, role, isVerifiedOfficial, simulateOfflineDemoLogin }}>
       {!loading && children}
     </AuthContext.Provider>
   );

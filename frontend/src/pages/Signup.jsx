@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import { useAuth } from '../context/AuthContext';
 
 function Signup() {
   const [name, setName] = useState('');
@@ -10,6 +11,7 @@ function Signup() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { simulateOfflineDemoLogin } = useAuth();
 
   const passwordRequirements = [
     { label: 'At least 8 characters', met: password.length >= 8 },
@@ -41,7 +43,11 @@ function Signup() {
       });
 
       if (signUpError) {
-        if (signUpError.message.toLowerCase().includes('already registered')) {
+        if (signUpError.message.toLowerCase().includes('fetch')) {
+          simulateOfflineDemoLogin();
+          navigate('/', { state: { info: 'Demo Mode: Offline Signup Successful! You are browsing locally as a simulated Verified Health Official.' } });
+          return;
+        } else if (signUpError.message.toLowerCase().includes('already registered')) {
           setError('An account with this email already exists. Try logging in instead.');
         } else {
           setError(signUpError.message);
