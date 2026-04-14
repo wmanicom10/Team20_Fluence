@@ -2,18 +2,7 @@ import { severityLevels } from '../data/mockDiseaseData';
 
 /**
  * DiseaseTable Component
- * Reusable table component for displaying disease data in tabular format
- * 
- * Props:
- * - data: Array of disease objects containing:
- *   - id: number - Unique identifier
- *   - disease: string - Name of the disease
- *   - location: string - Geographic location
- *   - caseCount: number - Total number of cases
- *   - date: string - Date of report
- *   - severity: string - Severity level
- *   - newCases24h: number - New cases in last 24 hours
- *   - rateOfChange: number - Percentage change
+ * Reusable table component for displaying disease data in tabular format.
  */
 function DiseaseTable({ data }) {
   if (!data || data.length === 0) {
@@ -38,7 +27,7 @@ function DiseaseTable({ data }) {
           {data.map((item) => {
             const severityStyle = severityLevels[item.severity] || severityLevels.Low;
             const isIncreasing = item.rateOfChange > 0;
-            
+
             return (
               <tr key={item.id}>
                 <td className="disease-name">{item.disease}</td>
@@ -46,10 +35,10 @@ function DiseaseTable({ data }) {
                 <td className="case-count">{item.caseCount.toLocaleString()}</td>
                 <td>{item.newCases24h}</td>
                 <td className={`trend ${isIncreasing ? 'increasing' : 'decreasing'}`}>
-                  {isIncreasing ? '↑' : '↓'} {Math.abs(item.rateOfChange)}%
+                  {isIncreasing ? '+' : '-'} {Math.abs(item.rateOfChange)}%
                 </td>
                 <td>
-                  <span 
+                  <span
                     className="severity-badge"
                     style={{ backgroundColor: severityStyle.color }}
                   >

@@ -3,28 +3,59 @@ import DiseaseCard from '../components/DiseaseCard';
 import DiseaseTable from '../components/DiseaseTable';
 import AiRiskSummary from '../components/AiRiskSummary';
 
+const DEFAULT_DISEASE_TYPES = ['All Diseases'];
+
+const getErrorMessage = (payload, fallbackMessage) => {
+  if (payload?.error?.message) {
+    return payload.error.message;
+  }
+
+  if (payload?.message) {
+    return payload.message;
+  }
+
+  return fallbackMessage;
+};
+
+const toCdcPathogen = (selectedDisease) => {
+  if (!selectedDisease || selectedDisease === 'All Diseases') {
+    return '';
+  }
+
+  if (selectedDisease === 'COVID-19') {
+    return 'COVID';
+  }
+
+  if (selectedDisease === 'Influenza') {
+    return 'Influenza';
+  }
+
+  if (selectedDisease === 'RSV') {
+    return 'RSV';
+  }
+
+  return null;
+};
+
 /**
  * DiseaseDataView Page Component
- * Displays disease-related data in a clear format with filtering options
- *
- * Features:
- * - Toggle between card and table view
- * - Filter by disease type
- * - Sort by various fields
- * - Display key metrics: disease name, location, case count, date
- * - Load and render live data from backend UI endpoints
+ * Displays disease-related data in a clear format with filtering options.
  */
 function DiseaseDataView() {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000';
 
-  const [viewMode, setViewMode] = useState('cards'); // 'cards' or 'table'
-  const [diseaseTypes, setDiseaseTypes] = useState(['All Diseases']);
+  const [viewMode, setViewMode] = useState('cards');
+  const [diseaseTypes, setDiseaseTypes] = useState(DEFAULT_DISEASE_TYPES);
   const [diseaseData, setDiseaseData] = useState([]);
   const [selectedDisease, setSelectedDisease] = useState('All Diseases');
   const [sortBy, setSortBy] = useState('caseCount');
   const [sortOrder, setSortOrder] = useState('desc');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [dataSource, setDataSource] = useState('live');
+  const [cdcFeed, setCdcFeed] = useState([]);
+  const [cdcLoading, setCdcLoading] = useState(true);
+  const [cdcError, setCdcError] = useState('');
 
   useEffect(() => {
     let isActive = true;
@@ -32,26 +63,27 @@ function DiseaseDataView() {
     const loadDiseaseTypes = async () => {
       try {
         const response = await fetch(`${apiBaseUrl}/api/ui/disease-types`).catch(() => null);
-        if (!response) throw new Error("Fallback to mock");
-        const payload = await response.json().catch(() => ({}));
+        if (!response) {
+          throw new Error('Network request failed');
+        }
 
+        const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload?.status === 'error') {
-          throw new Error("Fallback to mock");
+          throw new Error(getErrorMessage(payload, 'Failed to load disease filters.'));
         }
 
         const fetchedTypes = Array.isArray(payload?.data) ? payload.data : [];
-        const normalizedTypes = fetchedTypes.length > 0 ? fetchedTypes : ['All Diseases'];
+        const normalizedTypes = fetchedTypes.length > 0 ? fetchedTypes : DEFAULT_DISEASE_TYPES;
 
         if (isActive) {
           setDiseaseTypes(normalizedTypes);
-          setSelectedDisease((prev) => (normalizedTypes.includes(prev) ? prev : 'All Diseases'));
+          setSelectedDisease((current) => (normalizedTypes.includes(current) ? current : 'All Diseases'));
         }
       } catch (loadError) {
         if (isActive) {
-          setError('');
-          const mockTypes = ['All Diseases', 'COVID-19', 'Influenza', 'Malaria', 'Tuberculosis', 'Dengue Fever', 'Zika Virus', 'Cholera', 'Measles', 'Ebola'];
-          setDiseaseTypes(mockTypes);
-          setSelectedDisease((prev) => (mockTypes.includes(prev) ? prev : 'All Diseases'));
+          setDiseaseTypes(DEFAULT_DISEASE_TYPES);
+          setSelectedDisease('All Diseases');
+          setError((currentError) => currentError || loadError.message || 'Failed to load disease filters.');
         }
       }
     };
@@ -69,6 +101,7 @@ function DiseaseDataView() {
     const loadDiseaseData = async () => {
       setIsLoading(true);
       setError('');
+      setDataSource('live');
 
       try {
         const params = new URLSearchParams();
@@ -81,33 +114,24 @@ function DiseaseDataView() {
           : `${apiBaseUrl}/api/ui/disease-data`;
 
         const response = await fetch(endpoint).catch(() => null);
-        if (!response) throw new Error("Fallback to mock");
-        const payload = await response.json().catch(() => ({}));
+        if (!response) {
+          throw new Error('Network request failed');
+        }
 
+        const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload?.status === 'error') {
-          throw new Error("Fallback to mock");
+          throw new Error(getErrorMessage(payload, 'Failed to load dashboard data.'));
         }
 
         if (isActive) {
           setDiseaseData(Array.isArray(payload?.data) ? payload.data : []);
+          setDataSource('live');
         }
       } catch (loadError) {
         if (isActive) {
-          setError('');
-          // Rich, expanded mock data for impressive demo
-          const mockData = [
-            { id: 1, disease: 'COVID-19', location: 'Global', caseCount: 154231, date: new Date().toISOString(), severity: 'High', newCases24h: 1205, rateOfChange: 2.4 },
-            { id: 2, disease: 'Influenza', location: 'North America', caseCount: 84320, date: new Date().toISOString(), severity: 'Medium', newCases24h: 400, rateOfChange: -1.2 },
-            { id: 3, disease: 'Malaria', location: 'Sub-Saharan Africa', caseCount: 200500, date: new Date().toISOString(), severity: 'Critical', newCases24h: 3000, rateOfChange: 5.1 },
-            { id: 4, disease: 'Tuberculosis', location: 'South Asia', caseCount: 45000, date: new Date().toISOString(), severity: 'Medium', newCases24h: 150, rateOfChange: 0.5 },
-            { id: 5, disease: 'Dengue Fever', location: 'Southeast Asia', caseCount: 15000, date: new Date().toISOString(), severity: 'High', newCases24h: 530, rateOfChange: 4.8 },
-            { id: 6, disease: 'Zika Virus', location: 'South America', caseCount: 3200, date: new Date().toISOString(), severity: 'Low', newCases24h: 12, rateOfChange: -0.4 },
-            { id: 7, disease: 'Cholera', location: 'East Africa', caseCount: 9800, date: new Date().toISOString(), severity: 'Critical', newCases24h: 450, rateOfChange: 8.2 },
-            { id: 8, disease: 'Measles', location: 'Europe', caseCount: 2100, date: new Date().toISOString(), severity: 'Medium', newCases24h: 85, rateOfChange: 1.5 },
-            { id: 9, disease: 'COVID-19', location: 'East Asia', caseCount: 88000, date: new Date().toISOString(), severity: 'High', newCases24h: 890, rateOfChange: 2.1 },
-            { id: 10, disease: 'Ebola', location: 'Central Africa', caseCount: 150, date: new Date().toISOString(), severity: 'Critical', newCases24h: 5, rateOfChange: 12.5 }
-          ];
-          setDiseaseData(selectedDisease !== 'All Diseases' ? mockData.filter(d => d.disease === selectedDisease) : mockData);
+          setDiseaseData([]);
+          setDataSource('unavailable');
+          setError(loadError.message || 'Failed to load dashboard data.');
         }
       } finally {
         if (isActive) {
@@ -117,6 +141,59 @@ function DiseaseDataView() {
     };
 
     loadDiseaseData();
+
+    return () => {
+      isActive = false;
+    };
+  }, [apiBaseUrl, selectedDisease]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadCdcFeed = async () => {
+      const pathogen = toCdcPathogen(selectedDisease);
+      if (pathogen === null) {
+        setCdcFeed([]);
+        setCdcError('');
+        setCdcLoading(false);
+        return;
+      }
+
+      setCdcLoading(true);
+      setCdcError('');
+
+      try {
+        const params = new URLSearchParams({ limit: '9' });
+        if (pathogen) {
+          params.set('pathogen', pathogen);
+        }
+
+        const response = await fetch(`${apiBaseUrl}/api/external/cdc/respiratory-daily?${params.toString()}`).catch(() => null);
+        if (!response) {
+          throw new Error('Network request failed');
+        }
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.status === 'error') {
+          throw new Error(getErrorMessage(payload, 'Failed to load CDC respiratory feed.'));
+        }
+
+        if (isActive) {
+          setCdcFeed(Array.isArray(payload?.data?.rows) ? payload.data.rows : []);
+        }
+      } catch (loadError) {
+        if (isActive) {
+          setCdcFeed([]);
+          setCdcError(loadError.message || 'Failed to load CDC respiratory feed.');
+        }
+      } finally {
+        if (isActive) {
+          setCdcLoading(false);
+        }
+      }
+    };
+
+    loadCdcFeed();
 
     return () => {
       isActive = false;
@@ -162,6 +239,10 @@ function DiseaseDataView() {
       </header>
 
       <section className="summary-stats">
+        <div className="section-kicker">
+          <span className="section-kicker-badge">Fluence Reports</span>
+          <p>Collected and verified case reports stored in the Fluence platform.</p>
+        </div>
         <div className="stat-card">
           <span className="stat-value">{totalCases.toLocaleString()}</span>
           <span className="stat-label">Total Cases</span>
@@ -187,7 +268,7 @@ function DiseaseDataView() {
           <select
             id="disease-filter"
             value={selectedDisease}
-            onChange={(e) => setSelectedDisease(e.target.value)}
+            onChange={(event) => setSelectedDisease(event.target.value)}
           >
             {diseaseTypes.map((type) => (
               <option key={type} value={type}>
@@ -202,7 +283,7 @@ function DiseaseDataView() {
           <select
             id="sort-by"
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
+            onChange={(event) => setSortBy(event.target.value)}
           >
             <option value="caseCount">Case Count</option>
             <option value="disease">Disease Name</option>
@@ -268,9 +349,79 @@ function DiseaseDataView() {
         ) : null}
       </section>
 
+      <section className="external-feed-section">
+        <div className="external-feed-header">
+          <h2>CDC Respiratory Feed</h2>
+          <p>
+            Official CDC NSSP respiratory surveillance data shown alongside Fluence case reports.
+          </p>
+        </div>
+
+        {cdcLoading && <p className="dashboard-state">Loading CDC respiratory feed...</p>}
+
+        {!cdcLoading && cdcError && (
+          <p className="dashboard-state dashboard-state-error">
+            Unable to load CDC respiratory feed: {cdcError}
+          </p>
+        )}
+
+        {!cdcLoading && !cdcError && cdcFeed.length === 0 && (
+          <p className="dashboard-state">
+            No CDC respiratory feed entries are available for this disease filter.
+          </p>
+        )}
+
+        {!cdcLoading && !cdcError && cdcFeed.length > 0 ? (
+          <div className="cards-grid">
+            {cdcFeed.map((item) => (
+              <article key={item.id} className="disease-card cdc-feed-card">
+                <div className="card-header">
+                  <div>
+                    <h3 className="disease-name">{item.disease}</h3>
+                    <p className="cdc-source-label">{item.source}</p>
+                  </div>
+                  <span className={`severity-badge severity-badge-${String(item.severity).toLowerCase()}`}>
+                    {item.severity}
+                  </span>
+                </div>
+
+                <div className="card-body">
+                  <div className="card-row">
+                    <span className="label">Location:</span>
+                    <span className="value">{item.location}</span>
+                  </div>
+                  <div className="card-row">
+                    <span className="label">ED Visits %:</span>
+                    <span className="value case-count">{item.percentVisits}%</span>
+                  </div>
+                  <div className="card-row">
+                    <span className="label">Previous Day %:</span>
+                    <span className="value">{item.previousPercentVisits}%</span>
+                  </div>
+                  <div className="card-row">
+                    <span className="label">Change (1d):</span>
+                    <span className={`value trend ${item.changePoints > 0 ? 'increasing' : 'decreasing'}`}>
+                      {item.changePoints > 0 ? '+' : ''}{item.changePoints} pts
+                    </span>
+                  </div>
+                  <div className="card-row">
+                    <span className="label">Reported:</span>
+                    <span className="value date">{new Date(item.date).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
       <footer className="data-footer">
-        <p>
-          <em>Note: Data shown is loaded from live backend API responses.</em>
+        <p className={dataSource === 'live' ? 'data-source-live' : 'data-source-unavailable'}>
+          <em>
+            {dataSource === 'live'
+              ? 'Fluence Reports source: live backend API responses.'
+              : 'Live backend data is currently unavailable. Check the backend server and Supabase environment variables.'}
+          </em>
         </p>
       </footer>
     </div>
@@ -278,4 +429,3 @@ function DiseaseDataView() {
 }
 
 export default DiseaseDataView;
-

@@ -3,8 +3,20 @@ import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
-// Fix default marker icon issue with React-Leaflet
-// Uses CDN-hosted marker assets so markers render correctly in Vite.
+const DEFAULT_DISEASE_TYPES = ['All Diseases'];
+
+const getErrorMessage = (payload, fallbackMessage) => {
+  if (payload?.error?.message) {
+    return payload.error.message;
+  }
+
+  if (payload?.message) {
+    return payload.message;
+  }
+
+  return fallbackMessage;
+};
+
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
@@ -12,7 +24,6 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
 });
 
-// Center globally to showcase international data spread
 const mapCenter = [20.0, 0.0];
 const defaultZoom = 2;
 
@@ -20,9 +31,11 @@ const getNestedObject = (value) => {
   if (Array.isArray(value)) {
     return value[0] || {};
   }
+
   if (value && typeof value === 'object') {
     return value;
   }
+
   return {};
 };
 
@@ -32,11 +45,11 @@ function MapView() {
   const [selectedDisease, setSelectedDisease] = useState('All Diseases');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-
-  const [diseaseTypes, setDiseaseTypes] = useState(['All Diseases']);
+  const [diseaseTypes, setDiseaseTypes] = useState(DEFAULT_DISEASE_TYPES);
   const [rawCases, setRawCases] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [dataSource, setDataSource] = useState('live');
 
   useEffect(() => {
     let isActive = true;
@@ -44,26 +57,27 @@ function MapView() {
     const loadDiseaseTypes = async () => {
       try {
         const response = await fetch(`${apiBaseUrl}/api/ui/disease-types`).catch(() => null);
-        if (!response) throw new Error("Fallback");
-        const payload = await response.json().catch(() => ({}));
+        if (!response) {
+          throw new Error('Network request failed');
+        }
 
+        const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload?.status === 'error') {
-          throw new Error("Fallback");
+          throw new Error(getErrorMessage(payload, 'Failed to load disease filters.'));
         }
 
         const fetchedTypes = Array.isArray(payload?.data) ? payload.data : [];
-        const normalizedTypes = fetchedTypes.length > 0 ? fetchedTypes : ['All Diseases'];
+        const normalizedTypes = fetchedTypes.length > 0 ? fetchedTypes : DEFAULT_DISEASE_TYPES;
 
         if (isActive) {
           setDiseaseTypes(normalizedTypes);
-          setSelectedDisease((prev) => (normalizedTypes.includes(prev) ? prev : 'All Diseases'));
+          setSelectedDisease((current) => (normalizedTypes.includes(current) ? current : 'All Diseases'));
         }
       } catch (loadError) {
         if (isActive) {
-          setError('');
-          const mockTypes = ['All Diseases', 'COVID-19', 'Influenza', 'Malaria', 'Tuberculosis', 'Dengue Fever', 'Zika Virus', 'Cholera', 'Measles', 'Ebola'];
-          setDiseaseTypes(mockTypes);
-          setSelectedDisease((prev) => (mockTypes.includes(prev) ? prev : 'All Diseases'));
+          setDiseaseTypes(DEFAULT_DISEASE_TYPES);
+          setSelectedDisease('All Diseases');
+          setError((currentError) => currentError || loadError.message || 'Failed to load disease filters.');
         }
       }
     };
@@ -82,12 +96,14 @@ function MapView() {
       if (startDate && endDate && startDate > endDate) {
         setError('Start date cannot be later than end date.');
         setRawCases([]);
+        setDataSource('unavailable');
         setIsLoading(false);
         return;
       }
 
       setIsLoading(true);
       setError('');
+      setDataSource('live');
 
       try {
         const params = new URLSearchParams({ verified_only: 'true' });
@@ -105,32 +121,24 @@ function MapView() {
         }
 
         const response = await fetch(`${apiBaseUrl}/api/cases?${params.toString()}`).catch(() => null);
-        if (!response) throw new Error("Fallback");
-        const payload = await response.json().catch(() => ({}));
+        if (!response) {
+          throw new Error('Network request failed');
+        }
 
+        const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload?.status === 'error') {
-          throw new Error("Fallback");
+          throw new Error(getErrorMessage(payload, 'Failed to load map data.'));
         }
 
         if (isActive) {
           setRawCases(Array.isArray(payload?.data) ? payload.data : []);
+          setDataSource('live');
         }
       } catch (loadError) {
         if (isActive) {
-          setError('');
-          const mockCases = [
-            { case_id: 1, diseases: { name: 'COVID-19' }, locations: { city: 'New York', state_province: 'NY', latitude: 40.7128, longitude: -74.0060 }, case_count: 5042, severity: 'High', date_reported: '2026-04-10' },
-            { case_id: 2, diseases: { name: 'Influenza' }, locations: { city: 'Chicago', state_province: 'IL', latitude: 41.8781, longitude: -87.6298 }, case_count: 1200, severity: 'Medium', date_reported: '2026-04-12' },
-            { case_id: 3, diseases: { name: 'Malaria' }, locations: { city: 'Lagos', state_province: 'Lagos State', latitude: 6.5244, longitude: 3.3792 }, case_count: 320, severity: 'Critical', date_reported: '2026-04-14' },
-            { case_id: 4, diseases: { name: 'Tuberculosis' }, locations: { city: 'Mumbai', state_province: 'Maharashtra', latitude: 19.0760, longitude: 72.8777 }, case_count: 450, severity: 'Medium', date_reported: '2026-04-13' },
-            { case_id: 5, diseases: { name: 'Dengue Fever' }, locations: { city: 'Manila', state_province: 'Metro Manila', latitude: 14.5995, longitude: 120.9842 }, case_count: 850, severity: 'High', date_reported: '2026-04-11' },
-            { case_id: 6, diseases: { name: 'Zika Virus' }, locations: { city: 'Rio de Janeiro', state_province: 'Rio de Janeiro', latitude: -22.9068, longitude: -43.1729 }, case_count: 120, severity: 'Low', date_reported: '2026-04-09' },
-            { case_id: 7, diseases: { name: 'Cholera' }, locations: { city: 'Nairobi', state_province: 'Nairobi County', latitude: -1.2921, longitude: 36.8219 }, case_count: 600, severity: 'Critical', date_reported: '2026-04-14' },
-            { case_id: 8, diseases: { name: 'Measles' }, locations: { city: 'London', state_province: 'England', latitude: 51.5074, longitude: -0.1278 }, case_count: 85, severity: 'Medium', date_reported: '2026-04-12' },
-            { case_id: 9, diseases: { name: 'COVID-19' }, locations: { city: 'Tokyo', state_province: 'Tokyo', latitude: 35.6762, longitude: 139.6503 }, case_count: 3100, severity: 'High', date_reported: '2026-04-13' },
-            { case_id: 10, diseases: { name: 'Ebola' }, locations: { city: 'Kinshasa', state_province: 'Kinshasa', latitude: -4.4419, longitude: 15.2663 }, case_count: 15, severity: 'Critical', date_reported: '2026-04-14' }
-          ];
-          setRawCases(selectedDisease !== 'All Diseases' ? mockCases.filter(c => c.diseases.name === selectedDisease) : mockCases);
+          setRawCases([]);
+          setDataSource('unavailable');
+          setError(loadError.message || 'Failed to load map data.');
         }
       } finally {
         if (isActive) {
@@ -194,7 +202,7 @@ function MapView() {
           <select
             id="map-disease-filter"
             value={selectedDisease}
-            onChange={(e) => setSelectedDisease(e.target.value)}
+            onChange={(event) => setSelectedDisease(event.target.value)}
           >
             {diseaseTypes.map((type) => (
               <option key={type} value={type}>
@@ -210,7 +218,7 @@ function MapView() {
             type="date"
             id="map-start-date"
             value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
+            onChange={(event) => setStartDate(event.target.value)}
           />
         </div>
 
@@ -220,7 +228,7 @@ function MapView() {
             type="date"
             id="map-end-date"
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
+            onChange={(event) => setEndDate(event.target.value)}
           />
         </div>
 
@@ -270,8 +278,12 @@ function MapView() {
       </div>
 
       <footer className="data-footer">
-        <p>
-          <em>Note: Data shown is loaded from live backend API responses.</em>
+        <p className={dataSource === 'live' ? 'data-source-live' : 'data-source-unavailable'}>
+          <em>
+            {dataSource === 'live'
+              ? 'Data source: live backend API responses.'
+              : 'Live backend data is currently unavailable. Check the backend server and Supabase environment variables.'}
+          </em>
         </p>
       </footer>
     </div>

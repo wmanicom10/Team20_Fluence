@@ -1,7 +1,11 @@
 import hashlib
+import json
 import time
 from collections import defaultdict
 from datetime import datetime
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
+from urllib.error import HTTPError, URLError
 
 from flask import current_app, jsonify, request
 
@@ -14,6 +18,10 @@ API_PREFIX = "/api"
 # --- UI disease-data endpoint cache ---
 _ui_disease_data_cache = {}
 UI_DISEASE_DATA_CACHE_TTL = 30  # seconds
+_external_api_cache = {}
+
+CDC_RESPIRATORY_DAILY_URL = "https://data.cdc.gov/resource/vjzj-u7u8.json"
+CDC_RESPIRATORY_PATHOGENS = {"COVID", "Influenza", "RSV"}
 
 ALLOWED_CASE_UPDATE_FIELDS = {
     "disease_id",
@@ -49,6 +57,141 @@ SEVERITY_LABELS = {
     3: "High",
     4: "Critical",
 }
+
+
+def _external_cache_key(prefix, params):
+    encoded = json.dumps(params, sort_keys=True, separators=(",", ":"))
+    return hashlib.md5(f"{prefix}|{encoded}".encode()).hexdigest()
+
+
+def _get_external_cache_ttl(app):
+    return int(app.config.get("EXTERNAL_API_CACHE_TTL_SECONDS", 120))
+
+
+def _get_external_timeout(app):
+    return int(app.config.get("EXTERNAL_API_TIMEOUT_SECONDS", 8))
+
+
+def _fetch_json_from_url(url, timeout_seconds):
+    request_obj = urllib_request.Request(
+        url,
+        headers={
+            "User-Agent": "Fluence/1.0",
+            "Accept": "application/json",
+        },
+    )
+    with urllib_request.urlopen(request_obj, timeout=timeout_seconds) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _normalize_cdc_pathogen(value):
+    if not value:
+        return None
+
+    normalized = str(value).strip().lower()
+    if normalized in {"all", "all diseases"}:
+        return None
+    if normalized in {"covid", "covid-19"}:
+        return "COVID"
+    if normalized == "influenza":
+        return "Influenza"
+    if normalized == "rsv":
+        return "RSV"
+    if normalized == "ari":
+        return "ARI"
+    return str(value).strip()
+
+
+def _cdc_pathogen_display_name(pathogen):
+    if pathogen == "COVID":
+        return "COVID-19"
+    return pathogen
+
+
+def _cdc_severity(percent_visits):
+    if percent_visits >= 10:
+        return "Critical"
+    if percent_visits >= 5:
+        return "High"
+    if percent_visits >= 2:
+        return "Medium"
+    return "Low"
+
+
+def _format_cdc_respiratory_rows(rows, row_limit):
+    grouped = {}
+
+    for row in rows:
+        pathogen = row.get("pathogen")
+        geography = row.get("geography")
+        date_value = row.get("date")
+        percent_raw = row.get("percent_visits")
+
+        if not pathogen or not geography or not date_value:
+            continue
+
+        try:
+            percent_visits = round(float(percent_raw), 2)
+        except (TypeError, ValueError):
+            continue
+
+        try:
+            parsed_date = datetime.fromisoformat(date_value.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+
+        key = (pathogen, geography)
+        snapshot = grouped.setdefault(
+            key,
+            {
+                "latest": None,
+                "previous": None,
+            },
+        )
+
+        entry = {
+            "date": parsed_date.date().isoformat(),
+            "percent_visits": percent_visits,
+        }
+
+        if snapshot["latest"] is None:
+            snapshot["latest"] = entry
+        elif snapshot["previous"] is None:
+            snapshot["previous"] = entry
+
+    formatted = []
+
+    for index, ((pathogen, geography), snapshot) in enumerate(grouped.items(), start=1):
+        latest = snapshot["latest"]
+        previous = snapshot["previous"]
+        if not latest:
+            continue
+
+        previous_percent = previous["percent_visits"] if previous else latest["percent_visits"]
+        if previous_percent <= 0:
+            trend_percentage = 0.0
+        else:
+            trend_percentage = round(((latest["percent_visits"] - previous_percent) / previous_percent) * 100, 1)
+
+        change_points = round(latest["percent_visits"] - previous_percent, 2)
+
+        formatted.append(
+            {
+                "id": f"cdc-{index}",
+                "disease": _cdc_pathogen_display_name(pathogen),
+                "location": geography,
+                "date": latest["date"],
+                "severity": _cdc_severity(latest["percent_visits"]),
+                "percentVisits": latest["percent_visits"],
+                "previousPercentVisits": previous_percent,
+                "changePoints": change_points,
+                "rateOfChange": trend_percentage,
+                "source": "CDC NSSP",
+            }
+        )
+
+    formatted.sort(key=lambda item: item["percentVisits"], reverse=True)
+    return formatted[:row_limit]
 
 
 def _success(data, status_code=200):
@@ -619,6 +762,98 @@ def register_routes(app):
             return _success(["All Diseases", *names], 200)
         except Exception as exc:
             return _failure("Failed to load UI disease types", 500, str(exc))
+
+    @app.get(f"{API_PREFIX}/external/cdc/respiratory-daily")
+    def external_cdc_respiratory_daily():
+        pathogen = _normalize_cdc_pathogen(request.args.get("pathogen"))
+        geography = request.args.get("geography")
+        limit_value = request.args.get("limit", "12")
+
+        parsed_limit, limit_error = _parse_int(limit_value, "limit")
+        if limit_error:
+            return limit_error
+        if parsed_limit < 1:
+            return _failure("limit must be >= 1", 400)
+
+        if pathogen and pathogen not in {"COVID", "Influenza", "RSV", "ARI"}:
+            return _failure("Unsupported CDC pathogen filter", 400, {"pathogen": pathogen})
+
+        default_pathogens = ["COVID", "Influenza", "RSV"]
+        requested_pathogens = [pathogen] if pathogen else default_pathogens
+        fetch_limit = max(250, parsed_limit * 40)
+
+        cache_params = {
+            "pathogen": pathogen,
+            "geography": geography,
+            "limit": parsed_limit,
+        }
+        cache_key = _external_cache_key("cdc-respiratory-daily", cache_params)
+        ttl_seconds = _get_external_cache_ttl(current_app)
+        now = time.time()
+        cached = _external_api_cache.get(cache_key)
+
+        if cached and cached["expires_at"] > now:
+            response = _success(cached["payload"], 200)
+            response[0].headers["Cache-Control"] = f"public, max-age={ttl_seconds}"
+            response[0].headers["X-Cache"] = "HIT"
+            return response
+
+        query_params = {
+            "$select": "date,pathogen,geography,percent_visits",
+            "$order": "date DESC",
+            "$limit": str(fetch_limit),
+        }
+
+        where_clauses = [f"pathogen in ({','.join([repr(item) for item in requested_pathogens])})"]
+        if geography:
+            escaped_geography = str(geography).replace("'", "\\'")
+            where_clauses.append(f"geography = '{escaped_geography}'")
+        query_params["$where"] = " AND ".join(where_clauses)
+
+        upstream_url = f"{CDC_RESPIRATORY_DAILY_URL}?{urllib_parse.urlencode(query_params)}"
+
+        try:
+            rows = _fetch_json_from_url(upstream_url, _get_external_timeout(current_app))
+            formatted_rows = _format_cdc_respiratory_rows(rows or [], parsed_limit)
+            payload = {
+                "source": "CDC NSSP",
+                "filters": {
+                    "pathogen": pathogen,
+                    "geography": geography,
+                    "limit": parsed_limit,
+                },
+                "rows": formatted_rows,
+                "cache": {
+                    "hit": False,
+                    "ttl_seconds": ttl_seconds,
+                    "stale_fallback": False,
+                },
+                "meta": {
+                    "upstream": upstream_url,
+                    "generated_at": datetime.utcnow().isoformat() + "Z",
+                },
+            }
+
+            _external_api_cache[cache_key] = {
+                "payload": payload,
+                "expires_at": now + ttl_seconds,
+            }
+
+            response = _success(payload, 200)
+            response[0].headers["Cache-Control"] = f"public, max-age={ttl_seconds}"
+            response[0].headers["X-Cache"] = "MISS"
+            return response
+        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+            if cached:
+                stale_payload = dict(cached["payload"])
+                stale_payload["cache"] = dict(stale_payload.get("cache") or {})
+                stale_payload["cache"]["hit"] = False
+                stale_payload["cache"]["stale_fallback"] = True
+                stale_payload["meta"] = dict(stale_payload.get("meta") or {})
+                stale_payload["meta"]["warning"] = f"Upstream request failed; returned stale cache: {exc}"
+                return _success(stale_payload, 200)
+
+            return _failure("Failed to load external CDC respiratory data", 502, str(exc))
 
     @app.post(f"{API_PREFIX}/ai/train")
     def ai_train():
