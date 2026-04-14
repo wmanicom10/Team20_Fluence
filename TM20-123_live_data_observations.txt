@@ -1,0 +1,71 @@
+TM20-123: Get Disease Data Dashboard to Show Live Data
+Artifact: Live Data Validation & Observations
+
+---------------------------------------------
+
+Objective
+Validate that the dashboard correctly retrieves and displays live disease data,
+and identify any issues that could impact the presentation.
+
+---------------------------------------------
+
+Test Setup
+- Ran frontend locally
+- Observed network/API calls
+- Tested multiple filter combinations (location, disease, time)
+- Verified UI behavior under normal and failure conditions
+
+---------------------------------------------
+
+Observations
+
+1. Data Retrieval
+- Dashboard attempts to fetch live disease data through API endpoint
+- Data successfully loads in some cases
+- Inconsistent responses depending on selected filters
+
+2. Fallback Behavior
+- When API fails or returns empty data, system falls back to mock/default data
+- This prevents UI from breaking
+- However, it can mask real backend issues
+
+3. UI Behavior
+- Dashboard does not crash when data fails
+- Data is always displayed (real or fallback)
+- Some delay/loading inconsistencies observed
+
+4. Filter Interaction
+- Changing filters sometimes updates data correctly
+- In some cases, data does not refresh as expected
+- Behavior is not fully consistent
+
+5. Data Consistency
+- Format of returned data is consistent enough for UI rendering
+- Some edge cases may result in empty or partial datasets
+
+---------------------------------------------
+
+Risks for Presentation
+
+- Live API may fail or return inconsistent data
+- Fallback data may appear without clear indication (could mislead)
+- Filter updates may not always reflect changes instantly
+
+---------------------------------------------
+
+Mitigation Plan
+
+- Use a known working filter combination for demo
+- Rely on fallback behavior to avoid blank screens
+- Avoid edge-case inputs during presentation
+- Keep demo flow simple and controlled
+
+---------------------------------------------
+
+Conclusion
+
+The dashboard is functional and safe for presentation use.
+While live data is not fully reliable in all scenarios, fallback mechanisms
+ensure the UI remains stable and usable.
+
+The system is presentation-ready with controlled inputs.
