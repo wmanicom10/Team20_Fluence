@@ -1,0 +1,113 @@
+Fluence Presentation Planning Document (Draft)
+
+Goal
+Present Fluence as a functional, scalable system that combines:
+- real-world data
+- backend architecture
+- AI-driven insights
+without locking into rigid claims
+
+--------------------------------------------------
+
+Overall Flow (High-Level)
+
+1. Problem → Why this matters
+2. What Fluence is (concept + vision)
+3. System overview (high-level)
+4. Key features
+5. AI component (flexible depth)
+6. Demo
+7. Challenges + future direction
+
+--------------------------------------------------
+
+Section Ideas
+
+1. Introduction / Motivation
+- People lack clear insight into disease risk by location/time
+- Applications: travel decisions, awareness
+- Keep concise and realistic
+
+2. What Fluence Is
+- System that aggregates disease data and provides insights
+- Risk estimation / scoring
+- Location-based + time-based filtering
+
+3. System Architecture (High-Level)
+- Frontend: React/Vite
+- Backend: Flask/Python
+- Database: Supabase
+- External APIs: disease data
+- Focus on flow, not deep implementation
+
+4. Key Features (Pick 3–5)
+- Heatmap / visualization
+- Filtering (location, time, disease)
+- API endpoints (structured data)
+- Role-based access (if stable)
+- Caching / performance improvements
+
+5. AI Component (Keep Vague)
+- AI pipeline processes disease data → outputs risk metric
+- Mention:
+  - preprocessing / normalization
+  - dataset construction
+  - integration into system
+- Avoid deep model specifics unless confident
+
+6. Backend + Data Handling (Optional)
+- API routes
+- caching layer
+- Supabase integration
+- Focus on reliability and consistency
+
+7. Demo Plan
+
+Basic flow:
+1. Open app
+2. Select filters (location/date/disease)
+3. Show live updates
+4. Highlight risk output / visualization
+5. Optional: show fallback or robustness
+
+Keep demo:
+- simple
+- reliable
+- short
+
+8. Challenges
+- API integration issues
+- async frontend/backend syncing
+- data consistency
+- local environment setup
+- AI pipeline integration
+
+9. Future Work
+- improved AI models
+- more datasets
+- real-time data
+- scalability
+- UI / mobile improvements
+
+--------------------------------------------------
+
+Roles (Loose)
+- Intro / vision
+- Frontend / UX
+- Backend / data
+- AI system
+
+--------------------------------------------------
+
+Tone / Strategy
+- Don’t oversell AI
+- Emphasize system integration + engineering decisions
+- Keep it clean and confident
+
+--------------------------------------------------
+
+To Decide Later
+- exact demo script
+- which features to show
+- AI depth level
+- visuals (diagrams, screenshots)
