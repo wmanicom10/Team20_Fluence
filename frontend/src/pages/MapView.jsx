@@ -12,8 +12,9 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
 });
 
-const mapCenter = [39.8283, -98.5795];
-const defaultZoom = 4;
+// Center globally to showcase international data spread
+const mapCenter = [20.0, 0.0];
+const defaultZoom = 2;
 
 const getNestedObject = (value) => {
   if (Array.isArray(value)) {
