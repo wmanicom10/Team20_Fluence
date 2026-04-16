@@ -82,3 +82,12 @@ python app.py
 Auth request/response examples are documented in [docs/auth-endpoints.md](../docs/auth-endpoints.md).
 Health official verification request/response examples are documented in [docs/health-official-verification-endpoint.md](../docs/health-official-verification-endpoint.md).
 AI/risk and cache endpoint examples are documented in [docs/ai-risk-features.md](../docs/ai-risk-features.md).
+
+## OOP backend structure
+- `routes.py` now delegates the live API endpoints to the `BackendAPI` controller instead of keeping the business logic inside route functions.
+- `oop_api.py` contains the class-based backend layers:
+  - Encapsulation: `DiseaseRepository`, `LocationRepository`, `CaseRepository`, `DiseaseDataService`, and `CdcRespiratoryService` keep their data access and cache behavior inside class methods.
+  - Abstraction: `BaseRepository`, `BaseRowFormatter`, and `BaseExternalFeedService` define shared interfaces for concrete implementations.
+  - Inheritance: repository, formatter, and external-feed classes extend those shared base classes.
+  - Polymorphism: the controller works with formatter/service abstractions such as `FrontendDiseaseDataFormatter` and `CdcRespiratoryFormatter`, each implementing `format_rows(...)` differently.
+- `ai_integration.py` now exposes an `AIPipelineService` class so AI training and scoring also follow the same object-oriented structure.

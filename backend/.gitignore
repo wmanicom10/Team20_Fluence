@@ -9,6 +9,7 @@ build/
 
 # Virtual env
 .venv/
+.venv_test/
 venv/
 
 # OS / editor
