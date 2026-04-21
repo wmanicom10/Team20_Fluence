@@ -4,6 +4,12 @@ from services.base_service import BaseService
 
 
 class LocationService(BaseService):
+    """Concrete service that encapsulates location validation and queries.
+
+    This subclass inherits from BaseService and groups all location-specific
+    logic behind one interface for the locations table.
+    """
+
     def _table(self):
         return self.client.table("locations")
 
@@ -37,18 +43,23 @@ class LocationService(BaseService):
         }
 
     def get_all(self, filters=None):
+        """Override BaseService.get_all with location filter behavior."""
         return self._build_list_query(filters or {}).execute().data or []
 
     def get_by_id(self, item_id):
+        """Override BaseService.get_by_id for the locations table."""
         result = self._table().select("*").eq("location_id", item_id).limit(1).execute()
         return result.data[0] if result.data else None
 
     def create(self, payload):
+        """Override BaseService.create with location-specific validation."""
         normalized = self._validate_create_payload(payload)
         return self._table().insert(normalized).execute().data or []
 
     def update(self, item_id, payload):
+        """Override BaseService.update for location records."""
         return self._table().update(payload).eq("location_id", item_id).execute().data or []
 
     def delete(self, item_id):
+        """Override BaseService.delete for location records."""
         self._table().delete().eq("location_id", item_id).execute()

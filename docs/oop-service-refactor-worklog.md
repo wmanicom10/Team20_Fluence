@@ -10,7 +10,7 @@ Summary:
 - Kept the existing backend endpoints working after the refactor.
 
 Reference commit link:
-- Baseline repository commit: https://github.com/wmanicom10/Team20_Fluence/commit/cf864d3fa3bb4febb2024af0c2a9fd8eb006f3cb
+- Refactor commit: https://github.com/wmanicom10/Team20_Fluence/commit/deb2165
 
 Notes:
 - `CaseService.create()` performs case-specific validation including integer parsing, `YYYY-MM-DD` date validation, and non-negative case count checks.

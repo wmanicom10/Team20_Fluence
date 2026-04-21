@@ -6,6 +6,12 @@ from services.base_service import BaseService
 
 
 class CaseService(BaseService):
+    """Concrete service that encapsulates case validation and queries.
+
+    This subclass inherits from BaseService and centralizes case-specific
+    validation, date parsing, and table access for the cases resource.
+    """
+
     _case_select = (
         "case_id,case_count,date_reported,severity,verified,data_source,source_api,"
         "diseases(disease_id,name,category,severity_level),"
@@ -100,6 +106,7 @@ class CaseService(BaseService):
         return query
 
     def get_all(self, filters=None, disease_service=None):
+        """Override BaseService.get_all with case filtering and joins."""
         filters = filters or {}
         query = self._build_list_query(filters, disease_service)
         if query is None:
@@ -107,18 +114,22 @@ class CaseService(BaseService):
         return query.order("date_reported", desc=True).execute().data or []
 
     def get_by_id(self, item_id):
+        """Override BaseService.get_by_id for case records with joins."""
         result = self._table().select(self._case_select).eq("case_id", item_id).limit(1).execute()
         return result.data[0] if result.data else None
 
     def create(self, payload):
+        """Override BaseService.create with date and count validation."""
         normalized = self._validate_create_payload(payload)
         return self._table().insert(normalized).execute().data or []
 
     def update(self, item_id, payload):
+        """Override BaseService.update with case-specific normalization."""
         normalized = self._normalize_update_payload(payload)
         return self._table().update(normalized).eq("case_id", item_id).execute().data or []
 
     def delete(self, item_id):
+        """Override BaseService.delete for case records."""
         self._table().delete().eq("case_id", item_id).execute()
 
     def exists(self, item_id):

@@ -4,6 +4,12 @@ from services.base_service import BaseService
 
 
 class DiseaseService(BaseService):
+    """Concrete service that encapsulates disease validation and queries.
+
+    This subclass inherits from BaseService and keeps disease-specific rules
+    together, demonstrating encapsulation of behavior for the diseases table.
+    """
+
     def _table(self):
         return self.client.table("diseases")
 
@@ -33,20 +39,25 @@ class DiseaseService(BaseService):
         }
 
     def get_all(self, active_only=None):
+        """Override BaseService.get_all with disease-specific filtering."""
         return self._build_list_query(active_only=active_only).execute().data or []
 
     def get_by_id(self, item_id):
+        """Override BaseService.get_by_id for the diseases table."""
         result = self._table().select("*").eq("disease_id", item_id).limit(1).execute()
         return result.data[0] if result.data else None
 
     def create(self, payload):
+        """Override BaseService.create with category and severity validation."""
         normalized = self._validate_create_payload(payload)
         return self._table().insert(normalized).execute().data or []
 
     def update(self, item_id, payload):
+        """Override BaseService.update for disease records."""
         return self._table().update(payload).eq("disease_id", item_id).execute().data or []
 
     def delete(self, item_id):
+        """Override BaseService.delete for disease records."""
         self._table().delete().eq("disease_id", item_id).execute()
 
     def find_id_by_name(self, disease_name):
