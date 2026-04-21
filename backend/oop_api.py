@@ -11,6 +11,7 @@ from flask import current_app, jsonify, request
 
 import ai_dataset_export
 from ai_integration import get_or_train_ai_pipeline, train_ai_pipeline
+from services import CaseService, DiseaseService, LocationService
 
 
 SEVERITY_SCORES = {
@@ -379,7 +380,7 @@ class DiseaseDataService:
             if not disease_id:
                 return {"rows": [], "cache_hit": False}
 
-        rows = self.case_repository.list_for_ui(disease_id, start_date, end_date, verified_only)
+        rows = self.case_repository.get_dashboard_rows(disease_id, start_date, end_date, verified_only)
         formatted = self.formatter.format_rows(rows)
         self.cache.set(cache_key, formatted)
         return {"rows": formatted[:limit] if limit is not None else formatted, "cache_hit": False}
@@ -517,7 +518,7 @@ class MetricsService:
 
     def cases_by_disease(self, verified_only):
         totals = {}
-        for row in self.case_repository.list_for_metrics(verified_only):
+        for row in self.case_repository.get_metric_rows(verified_only):
             disease_name = (row.get("diseases") or {}).get("name")
             if disease_name:
                 totals[disease_name] = totals.get(disease_name, 0) + int(row.get("case_count") or 0)
@@ -556,12 +557,16 @@ class AuthService:
             "expires_at": getattr(session, "expires_at", None),
         }
 
-    def signup(self, name, email, password):
+    def signup(self, name, email, password, email_redirect_to=None):
+        options = {"data": {"name": name}}
+        if email_redirect_to:
+            options["email_redirect_to"] = email_redirect_to
+
         auth_result = self.client.auth.sign_up(
             {
                 "email": email,
                 "password": password,
-                "options": {"data": {"name": name}},
+                "options": options,
             }
         )
         user = getattr(auth_result, "user", None)
@@ -753,7 +758,7 @@ class BackendAPI:
 
     def _repositories(self):
         client = self.client_factory(current_app)
-        return DiseaseRepository(client), LocationRepository(client), CaseRepository(client)
+        return DiseaseService(client), LocationService(client), CaseService(client)
 
     def ui_service(self):
         diseases, _, cases = self._repositories()
@@ -794,7 +799,7 @@ class BackendAPI:
                 if error_response:
                     return error_response
             diseases, _, _ = self._repositories()
-            return ApiResponse.success(diseases.list(parsed_active), 200)
+            return ApiResponse.success(diseases.get_all(parsed_active), 200)
         except Exception as exc:
             return ApiResponse.failure("Failed to load diseases", 500, str(exc))
 
@@ -835,9 +840,27 @@ class BackendAPI:
             return ApiResponse.failure("password must be at least 8 characters long", 400)
         try:
             service = AuthService(self.client_factory(current_app))
-            return ApiResponse.success(service.signup(payload["name"].strip(), payload["email"].strip(), payload["password"]), 201)
+            return ApiResponse.success(
+                service.signup(
+                    payload["name"].strip(),
+                    payload["email"].strip(),
+                    payload["password"],
+                    payload.get("emailRedirectTo") or payload.get("email_redirect_to"),
+                ),
+                201,
+            )
         except Exception as exc:
-            return ApiResponse.failure("Failed to sign up", 500, str(exc))
+            message = str(exc) or "Unexpected signup error"
+            lowered = message.lower()
+            if "already registered" in lowered:
+                return ApiResponse.failure("User already registered", 409, message)
+            if "rate limit" in lowered:
+                return ApiResponse.failure("Email rate limit exceeded", 429, message)
+            if "password" in lowered:
+                return ApiResponse.failure("Invalid signup request", 400, message)
+            if "email" in lowered and "invalid" in lowered:
+                return ApiResponse.failure("Invalid signup request", 400, message)
+            return ApiResponse.failure("Failed to sign up", 500, message)
 
     def auth_login(self):
         payload, error_response = RequestParser.require_json_body()
@@ -892,7 +915,7 @@ class BackendAPI:
     def list_locations(self):
         try:
             _, locations, _ = self._repositories()
-            return ApiResponse.success(locations.list(request.args), 200)
+            return ApiResponse.success(locations.get_all(request.args), 200)
         except Exception as exc:
             return ApiResponse.failure("Failed to load locations", 500, str(exc))
 
@@ -949,7 +972,7 @@ class BackendAPI:
                 if error_response:
                     return error_response
             diseases, _, cases = self._repositories()
-            return ApiResponse.success(cases.list_cases(filters, diseases), 200)
+            return ApiResponse.success(cases.get_all(filters, diseases), 200)
         except Exception as exc:
             return ApiResponse.failure("Failed to load cases", 500, str(exc))
 
@@ -1092,7 +1115,7 @@ class BackendAPI:
     def ui_disease_types(self):
         try:
             diseases, _, _ = self._repositories()
-            return ApiResponse.success(["All Diseases", *diseases.active_names()], 200)
+            return ApiResponse.success(["All Diseases", *diseases.get_active_names()], 200)
         except Exception as exc:
             return ApiResponse.failure("Failed to load UI disease types", 500, str(exc))
 

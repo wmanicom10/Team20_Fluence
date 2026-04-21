@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
 function Signup() {
@@ -12,6 +11,7 @@ function Signup() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { simulateOfflineDemoLogin } = useAuth();
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000';
 
   const passwordRequirements = [
     { label: 'At least 8 characters', met: password.length >= 8 },
@@ -34,39 +34,35 @@ function Signup() {
 
     setLoading(true);
     try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: window.location.origin + '/verify-email'
-        }
+      const response = await fetch(`${apiBaseUrl}/api/auth/signup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name,
+          email,
+          password,
+          emailRedirectTo: `${window.location.origin}/verify-email`,
+        }),
       });
+      const payload = await response.json().catch(() => ({}));
 
-      if (signUpError) {
-        if (signUpError.message.toLowerCase().includes('fetch')) {
+      if (!response.ok || payload?.status === 'error') {
+        const message = payload?.error?.details || payload?.error?.message || 'Unexpected error creating account';
+        if (message.toLowerCase().includes('fetch')) {
           simulateOfflineDemoLogin();
           navigate('/', { state: { info: 'Demo Mode: Offline Signup Successful! You are browsing locally as a simulated Verified Health Official.' } });
           return;
-        } else if (signUpError.message.toLowerCase().includes('already registered')) {
+        } else if (message.toLowerCase().includes('rate limit')) {
+          setError('Email rate limit exceeded. Wait a bit, then use the verification email already sent or try resending once the cooldown passes.');
+        } else if (message.toLowerCase().includes('email rate limit exceeded')) {
+          setError('Email rate limit exceeded. Wait a bit, then use the verification email already sent or try resending once the cooldown passes.');
+        } else if (message.toLowerCase().includes('already registered')) {
           setError('An account with this email already exists. Try logging in instead.');
         } else {
-          setError(signUpError.message);
+          setError(message);
         }
-        return;
-      }
-
-      const { error: insertError } = await supabase.from('users').insert({
-        user_id: data.user.id,
-        email: email,
-        name: name,
-        role: 'public',
-        verified: false,
-        created_at: new Date().toISOString(),
-        last_login: new Date().toISOString(),
-      });
-
-      if (insertError && insertError.code !== '42501') {
-        setError(insertError.message);
         return;
       }
 
