@@ -120,7 +120,7 @@ class TimedCache:
         return int(self._ttl_provider())
 
 
-class BaseRepository(ABC):
+class BaseService(ABC):
     table_name = ""
 
     def __init__(self, client):
@@ -129,9 +129,49 @@ class BaseRepository(ABC):
     def table(self):
         return self.client.table(self.table_name)
 
+    @abstractmethod
+    def get_all(self):
+        pass
 
-class DiseaseRepository(BaseRepository):
+    @abstractmethod
+    def get_by_id(self, record_id):
+        pass
+
+    @abstractmethod
+    def create(self, payload):
+        pass
+
+    @abstractmethod
+    def update(self, record_id, payload):
+        pass
+
+    @abstractmethod
+    def delete(self, record_id):
+        pass
+
+    def _validate_payload(self, payload):
+        return payload
+
+
+class DiseaseService(BaseService):
     table_name = "diseases"
+
+    def _validate_payload(self, payload):
+        if "category" not in payload:
+            raise ValueError("Disease requires category")
+        return payload
+
+    def get_all(self):
+        return self.list()
+
+    def get_by_id(self, record_id):
+        return None
+
+    def update(self, record_id, payload):
+        return None
+
+    def delete(self, record_id):
+        pass
 
     def list(self, active_only=None):
         query = self.table().select("*").order("name")
@@ -140,6 +180,7 @@ class DiseaseRepository(BaseRepository):
         return query.execute().data or []
 
     def create(self, payload):
+        self._validate_payload(payload)
         return self.table().insert(payload).execute().data or []
 
     def find_id_by_name(self, disease_name):
@@ -153,8 +194,25 @@ class DiseaseRepository(BaseRepository):
         return [row["name"] for row in (result.data or []) if row.get("name")]
 
 
-class LocationRepository(BaseRepository):
+class LocationService(BaseService):
     table_name = "locations"
+
+    def _validate_payload(self, payload):
+        if "city" not in payload:
+            raise ValueError("Location requires city")
+        return payload
+
+    def get_all(self):
+        return self.list({})
+
+    def get_by_id(self, record_id):
+        return None
+
+    def update(self, record_id, payload):
+        return None
+
+    def delete(self, record_id):
+        pass
 
     def list(self, filters):
         query = self.table().select("*").order("city")
@@ -165,16 +223,25 @@ class LocationRepository(BaseRepository):
         return query.execute().data or []
 
     def create(self, payload):
+        self._validate_payload(payload)
         return self.table().insert(payload).execute().data or []
 
 
-class CaseRepository(BaseRepository):
+class CaseService(BaseService):
     table_name = "cases"
     base_select = (
         "case_id,case_count,date_reported,severity,verified,data_source,source_api,"
         "diseases(disease_id,name,category,severity_level),"
         "locations(location_id,city,state_province,country,latitude,longitude)"
     )
+
+    def _validate_payload(self, payload):
+        if "case_count" not in payload:
+            raise ValueError("Case requires case_count")
+        return payload
+
+    def get_all(self):
+        return self.table().select(self.base_select).execute().data or []
 
     def get_by_id(self, case_id):
         result = self.table().select(self.base_select).eq("case_id", case_id).limit(1).execute()
@@ -185,6 +252,7 @@ class CaseRepository(BaseRepository):
         return bool(result.data)
 
     def create(self, payload):
+        self._validate_payload(payload)
         return self.table().insert(payload).execute().data or []
 
     def update(self, case_id, payload):
@@ -753,7 +821,7 @@ class BackendAPI:
 
     def _repositories(self):
         client = self.client_factory(current_app)
-        return DiseaseRepository(client), LocationRepository(client), CaseRepository(client)
+        return DiseaseService(client), LocationService(client), CaseService(client)
 
     def ui_service(self):
         diseases, _, cases = self._repositories()
