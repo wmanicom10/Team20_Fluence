@@ -12,6 +12,7 @@ function Login() {
   const navigate = useNavigate();
   const location = useLocation();
   const { simulateOfflineDemoLogin } = useAuth();
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000';
 
   useEffect(() => {
     if (location.state?.info) {
@@ -51,10 +52,7 @@ function Login() {
         return;
       }
 
-      await supabase
-        .from('users')
-        .update({ last_login: new Date().toISOString() })
-        .eq('user_id', data.user.id);
+      await fetch(`${apiBaseUrl}/api/auth/verify-official/status?email=${encodeURIComponent(email)}`).catch(() => null);
 
       navigate('/');
     } catch (err) {
