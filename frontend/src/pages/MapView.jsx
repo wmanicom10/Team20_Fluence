@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { mockRawCasesData, diseaseTypes as mockDiseaseTypes } from '../data/mockDiseaseData';
 
 const DEFAULT_DISEASE_TYPES = ['All Diseases'];
 
@@ -75,9 +76,8 @@ function MapView() {
         }
       } catch (loadError) {
         if (isActive) {
-          setDiseaseTypes(DEFAULT_DISEASE_TYPES);
-          setSelectedDisease('All Diseases');
-          setError((currentError) => currentError || loadError.message || 'Failed to load disease filters.');
+          setDiseaseTypes(mockDiseaseTypes);
+          setSelectedDisease((current) => (mockDiseaseTypes.includes(current) ? current : 'All Diseases'));
         }
       }
     };
@@ -136,9 +136,19 @@ function MapView() {
         }
       } catch (loadError) {
         if (isActive) {
-          setRawCases([]);
-          setDataSource('unavailable');
-          setError(loadError.message || 'Failed to load map data.');
+          let fallbackData = mockRawCasesData;
+          if (selectedDisease && selectedDisease !== 'All Diseases') {
+            fallbackData = mockRawCasesData.filter(d => d.diseases?.name === selectedDisease);
+          }
+          if (startDate) {
+            fallbackData = fallbackData.filter(d => d.date_reported >= startDate);
+          }
+          if (endDate) {
+            fallbackData = fallbackData.filter(d => d.date_reported <= endDate);
+          }
+          setRawCases(fallbackData);
+          setDataSource('mock');
+          setError('');
         }
       } finally {
         if (isActive) {
@@ -282,7 +292,9 @@ function MapView() {
           <em>
             {dataSource === 'live'
               ? 'Data source: live backend API responses.'
-              : 'Live backend data is currently unavailable. Check the backend server and Supabase environment variables.'}
+              : dataSource === 'mock'
+                ? 'Live backend data is currently unavailable. Showing mock data for demonstration.'
+                : 'Live backend data is currently unavailable. Check the backend server and Supabase environment variables.'}
           </em>
         </p>
       </footer>

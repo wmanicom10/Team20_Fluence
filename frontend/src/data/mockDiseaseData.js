@@ -141,3 +141,32 @@ export const severityLevels = {
   High: { color: "#fd7e14", label: "High" },
   Critical: { color: "#dc3545", label: "Critical" }
 };
+
+export const mockRawCasesData = mockDiseaseData.map(d => {
+  const [city, state_province] = d.location.split(', ');
+  const coords = {
+    "New York": { lat: 40.71, lng: -74.00 },
+    "Los Angeles": { lat: 34.05, lng: -118.24 },
+    "Chicago": { lat: 41.87, lng: -87.62 },
+    "Houston": { lat: 29.76, lng: -95.36 },
+    "Phoenix": { lat: 33.44, lng: -112.07 },
+    "Philadelphia": { lat: 39.95, lng: -75.16 },
+    "San Antonio": { lat: 29.42, lng: -98.49 },
+    "San Diego": { lat: 32.71, lng: -117.16 },
+    "Dallas": { lat: 32.77, lng: -96.79 },
+    "San Jose": { lat: 37.33, lng: -121.88 }
+  };
+  return {
+    case_id: d.id,
+    case_count: d.caseCount,
+    severity: d.severity,
+    date_reported: d.date,
+    diseases: { name: d.disease },
+    locations: {
+      city,
+      state_province,
+      latitude: coords[city]?.lat || 0,
+      longitude: coords[city]?.lng || 0
+    }
+  };
+});

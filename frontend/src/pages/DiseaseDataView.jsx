@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import DiseaseCard from '../components/DiseaseCard';
 import DiseaseTable from '../components/DiseaseTable';
 import AiRiskSummary from '../components/AiRiskSummary';
+import { mockDiseaseData, diseaseTypes as mockDiseaseTypes } from '../data/mockDiseaseData';
 
 const DEFAULT_DISEASE_TYPES = ['All Diseases'];
 
@@ -81,9 +82,8 @@ function DiseaseDataView() {
         }
       } catch (loadError) {
         if (isActive) {
-          setDiseaseTypes(DEFAULT_DISEASE_TYPES);
-          setSelectedDisease('All Diseases');
-          setError((currentError) => currentError || loadError.message || 'Failed to load disease filters.');
+          setDiseaseTypes(mockDiseaseTypes);
+          setSelectedDisease((current) => (mockDiseaseTypes.includes(current) ? current : 'All Diseases'));
         }
       }
     };
@@ -129,9 +129,13 @@ function DiseaseDataView() {
         }
       } catch (loadError) {
         if (isActive) {
-          setDiseaseData([]);
-          setDataSource('unavailable');
-          setError(loadError.message || 'Failed to load dashboard data.');
+          let fallbackData = mockDiseaseData;
+          if (selectedDisease && selectedDisease !== 'All Diseases') {
+            fallbackData = mockDiseaseData.filter(d => d.disease === selectedDisease);
+          }
+          setDiseaseData(fallbackData);
+          setDataSource('mock');
+          setError('');
         }
       } finally {
         if (isActive) {
@@ -420,7 +424,9 @@ function DiseaseDataView() {
           <em>
             {dataSource === 'live'
               ? 'Fluence Reports source: live backend API responses.'
-              : 'Live backend data is currently unavailable. Check the backend server and Supabase environment variables.'}
+              : dataSource === 'mock'
+                ? 'Live backend data is currently unavailable. Showing mock data for demonstration.'
+                : 'Live backend data is currently unavailable. Check the backend server and Supabase environment variables.'}
           </em>
         </p>
       </footer>
