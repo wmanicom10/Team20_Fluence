@@ -204,7 +204,7 @@ function CaseSubmission() {
           textAlign: 'center',
         }}>
           <h3 style={{ margin: '0 0 0.75rem', color: '#f5a623' }}>
-            🔒 Health Official Verification Required
+            Health Official Verification Required
           </h3>
           {role === 'pending_official' ? (
             <p style={{ margin: '0 0 1rem', color: '#ccc' }}>

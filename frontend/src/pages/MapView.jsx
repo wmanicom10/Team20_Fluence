@@ -286,18 +286,6 @@ function MapView() {
             ))}
         </MapContainer>
       </div>
-
-      <footer className="data-footer">
-        <p className={dataSource === 'live' ? 'data-source-live' : 'data-source-unavailable'}>
-          <em>
-            {dataSource === 'live'
-              ? 'Data source: live backend API responses.'
-              : dataSource === 'mock'
-                ? 'Live backend data is currently unavailable. Showing mock data for demonstration.'
-                : 'Live backend data is currently unavailable. Check the backend server and Supabase environment variables.'}
-          </em>
-        </p>
-      </footer>
     </div>
   );
 }
