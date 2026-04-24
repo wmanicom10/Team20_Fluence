@@ -257,7 +257,7 @@ function MapView() {
         <p className="dashboard-state">No map data available for the selected filters.</p>
       )}
 
-      <div className="map-container" style={{ height: '600px', width: '100%' }}>
+      <div className="map-container" style={{ height: 'calc(100vh - 250px)', minHeight: '400px', width: '100%' }}>
         <MapContainer
           center={mapCenter}
           zoom={defaultZoom}

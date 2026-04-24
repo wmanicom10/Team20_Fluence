@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 function Navbar() {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -14,32 +16,41 @@ function Navbar() {
   };
 
   const handleLogout = async () => {
+    closeMenu();
     await logout();
     navigate('/login');
   };
 
+  const toggleMenu = () => setIsMobileMenuOpen(!isMobileMenuOpen);
+  const closeMenu = () => setIsMobileMenuOpen(false);
+
   return (
     <nav className="navbar">
       <div className="nav-brand">
-        <Link to="/">
+        <Link to="/" onClick={closeMenu}>
           <h1>Fluence</h1>
         </Link>
       </div>
-      <ul className="nav-links">
+      
+      <button className="mobile-menu-btn" onClick={toggleMenu} aria-label="Toggle navigation">
+        {isMobileMenuOpen ? '✕' : '☰'}
+      </button>
+
+      <ul className={`nav-links ${isMobileMenuOpen ? 'mobile-open' : ''}`}>
         <li>
-          <Link to="/" className={isActive('/')}>Home</Link>
+          <Link to="/" className={isActive('/')} onClick={closeMenu}>Home</Link>
         </li>
         <li>
-          <Link to="/data" className={isActive('/data')}>Disease Data</Link>
+          <Link to="/data" className={isActive('/data')} onClick={closeMenu}>Disease Data</Link>
         </li>
         <li>
-          <Link to="/map" className={isActive('/map')}>Map</Link>
+          <Link to="/map" className={isActive('/map')} onClick={closeMenu}>Map</Link>
         </li>
         <li>
-          <Link to="/submit" className={isActive('/submit')}>Submit Case</Link>
+          <Link to="/submit" className={isActive('/submit')} onClick={closeMenu}>Submit Case</Link>
         </li>
         <li>
-          <Link to="/verify" className={isActive('/verify')}>Verify Official</Link>
+          <Link to="/verify" className={isActive('/verify')} onClick={closeMenu}>Verify Official</Link>
         </li>
         {user && !isResettingPassword ? (
           <>
@@ -53,10 +64,10 @@ function Navbar() {
         ) : !isResettingPassword && (
           <>
             <li>
-              <Link to="/login" className={isActive('/login')}>Login</Link>
+              <Link to="/login" className={isActive('/login')} onClick={closeMenu}>Login</Link>
             </li>
             <li>
-              <Link to="/signup" className={isActive('/signup')}>Sign Up</Link>
+              <Link to="/signup" className={isActive('/signup')} onClick={closeMenu}>Sign Up</Link>
             </li>
           </>
         )}

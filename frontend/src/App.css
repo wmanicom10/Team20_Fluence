@@ -73,6 +73,20 @@
 .nav-logout {
   color: white;
   background: rgba(255, 255, 255, 0.2);
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 1rem;
+}
+
+.mobile-menu-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: white;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0.5rem;
 }
 
 /* ========================================
@@ -736,8 +750,34 @@
   }
   
   .navbar {
+    flex-wrap: wrap;
+  }
+  
+  .mobile-menu-btn {
+    display: block;
+  }
+
+  .nav-links {
+    display: none;
     flex-direction: column;
-    gap: 1rem;
+    width: 100%;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .nav-links.mobile-open {
+    display: flex;
+  }
+
+  .nav-links li {
+    width: 100%;
+  }
+
+  .nav-link {
+    display: block;
+    text-align: center;
+    width: 100%;
+    box-sizing: border-box;
   }
   
   .form-row {
