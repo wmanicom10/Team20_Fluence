@@ -124,7 +124,6 @@ function HealthOfficialAuth() {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-header">
-          <span className="auth-icon">🏥</span>
           <h2>Health Official Verification</h2>
           <p className="muted">
             Submit your credentials to verify your identity as a health official.
@@ -139,7 +138,7 @@ function HealthOfficialAuth() {
           <form onSubmit={handleSubmit} className="auth-form">
             <div className="form-row">
               <label>
-                Full Name <span className="required">*</span>
+                Full Name
                 <input
                   type="text"
                   name="fullName"
@@ -151,7 +150,7 @@ function HealthOfficialAuth() {
               </label>
 
               <label>
-                Email <span className="required">*</span>
+                Email
                 <input
                   type="email"
                   name="email"
@@ -165,7 +164,7 @@ function HealthOfficialAuth() {
 
             <div className="form-row">
               <label>
-                License / Credential Number <span className="required">*</span>
+                License / Credential Number
                 <input
                   type="text"
                   name="licenseNumber"
@@ -177,7 +176,7 @@ function HealthOfficialAuth() {
               </label>
 
               <label>
-                Issuing State <span className="required">*</span>
+                Issuing State
                 <select
                   name="issuingState"
                   value={form.issuingState}
@@ -195,7 +194,7 @@ function HealthOfficialAuth() {
             </div>
 
             <label>
-              Organization / Institution <span className="required">*</span>
+              Organization / Institution
               <input
                 type="text"
                 name="organization"
