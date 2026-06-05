@@ -18,6 +18,7 @@ The frontend branch can replace mock data with these two endpoints directly:
 
 - `GET /api/ui/disease-data`
 - `GET /api/ui/disease-types`
+- `GET /api/ai/risk-output`
 
 `/api/ui/disease-data` supports query params used by UI filters:
 - `disease` (example: `COVID-19`, or `All Diseases`)
@@ -54,6 +55,8 @@ SUPABASE_KEY=YOUR_SUPABASE_KEY
 FLASK_DEBUG=true
 SECRET_KEY=dev-key
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+EXTERNAL_API_CACHE_TTL_SECONDS=120
+EXTERNAL_API_TIMEOUT_SECONDS=8
 ```
 
 Run:
@@ -63,9 +66,28 @@ python app.py
 ```
 
 ## Core API endpoints
+- `POST /api/auth/signup`
+- `POST /api/auth/login`
+- `POST /api/auth/verify-official`
+- `GET /api/auth/verify-official/status`
 - `GET /api/health`
 - `GET/POST /api/diseases`
 - `GET/POST /api/locations`
 - `GET/POST /api/cases`
 - `GET/PATCH/DELETE /api/cases/<case_id>`
 - `GET /api/metrics/cases-by-disease`
+- `GET /api/external/covid/countries`
+- `GET /api/ai/risk-output`
+
+Auth request/response examples are documented in [docs/auth-endpoints.md](../docs/auth-endpoints.md).
+Health official verification request/response examples are documented in [docs/health-official-verification-endpoint.md](../docs/health-official-verification-endpoint.md).
+AI/risk and cache endpoint examples are documented in [docs/ai-risk-features.md](../docs/ai-risk-features.md).
+
+## OOP backend structure
+- `routes.py` now delegates the live API endpoints to the `BackendAPI` controller instead of keeping the business logic inside route functions.
+- `oop_api.py` contains the class-based backend layers:
+  - Encapsulation: `DiseaseRepository`, `LocationRepository`, `CaseRepository`, `DiseaseDataService`, and `CdcRespiratoryService` keep their data access and cache behavior inside class methods.
+  - Abstraction: `BaseRepository`, `BaseRowFormatter`, and `BaseExternalFeedService` define shared interfaces for concrete implementations.
+  - Inheritance: repository, formatter, and external-feed classes extend those shared base classes.
+  - Polymorphism: the controller works with formatter/service abstractions such as `FrontendDiseaseDataFormatter` and `CdcRespiratoryFormatter`, each implementing `format_rows(...)` differently.
+- `ai_integration.py` now exposes an `AIPipelineService` class so AI training and scoring also follow the same object-oriented structure.
